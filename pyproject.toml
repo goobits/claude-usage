@@ -27,11 +27,11 @@ classifiers = [
 ]
 
 [project.scripts]
-claude-usage = "claude_usage_max:main"
+claude-usage = "claude_usage:main"
 
 [project.urls]
 Homepage = "https://github.com/miko/claude-usage"
 Repository = "https://github.com/miko/claude-usage"
 
 [tool.setuptools]
-py-modules = ["claude_usage_max"]
+py-modules = ["claude_usage"]

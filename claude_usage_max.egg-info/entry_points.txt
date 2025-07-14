@@ -1,2 +1,0 @@
-[console_scripts]
-claude-usage = claude_usage_max:main
