@@ -3,7 +3,7 @@ requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "claude-usage-max"
+name = "claude-usage"
 version = "1.0.0"
 description = "Fast Python implementation for Claude usage analysis across multiple VMs"
 authors = [{name = "Miko", email = "miko@example.com"}]
@@ -30,8 +30,8 @@ classifiers = [
 claude-usage = "claude_usage_max:main"
 
 [project.urls]
-Homepage = "https://github.com/miko/claude-usage-max"
-Repository = "https://github.com/miko/claude-usage-max"
+Homepage = "https://github.com/miko/claude-usage"
+Repository = "https://github.com/miko/claude-usage"
 
 [tool.setuptools]
 py-modules = ["claude_usage_max"]
