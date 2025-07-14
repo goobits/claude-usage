@@ -1,0 +1,785 @@
+#!/usr/bin/env node
+// claude-usage: Claude Usage - Optimal aggregation using core library functions
+
+import { loadDailyUsageData, loadSessionData, loadMonthlyUsageData, loadSessionBlockData } from '../claude-usage/dist/data-loader.js';
+import { calculateTotals, createTotalsObject, getTotalTokens } from '../claude-usage/dist/calculate-cost.js';
+import { log, logger } from '../claude-usage/dist/logger.js';
+import { homedir } from 'node:os';
+import { glob } from 'tinyglobby';
+import path from 'node:path';
+import { existsSync } from 'node:fs';
+import { performance } from 'node:perf_hooks';
+
+// Custom path discovery that includes VMs
+async function getAllClaudePaths() {
+    const paths = new Set(); // Use Set to avoid duplicates
+    const homeDir = homedir();
+    
+    // Add main Claude path (only location that actually exists)
+    const mainClaudePath = path.join(homeDir, '.claude');
+    if (existsSync(path.join(mainClaudePath, 'projects'))) {
+        paths.add(mainClaudePath);
+    }
+    
+    // Add VMs - look for directories that contain 'projects' subdirectory
+    const vmsPattern = path.join(homeDir, '.claude', 'vms', '*');
+    const vmDirs = await glob([vmsPattern], { onlyDirectories: true, absolute: true });
+    
+    for (const vmDir of vmDirs) {
+        if (existsSync(path.join(vmDir, 'projects'))) {
+            paths.add(vmDir);
+        }
+    }
+    
+    return Array.from(paths);
+}
+
+// Aggregate data from multiple paths efficiently
+async function loadAggregatedData(command, options = {}) {
+    const allPaths = await getAllClaudePaths();
+    
+    if (!options.isJson) {
+        console.log(`🔍 Discovered ${allPaths.length} Claude instances`);
+    }
+    
+    // Suppress logs for cleaner output during aggregation
+    const originalLevel = logger.level;
+    if (!options.isJson) {
+        logger.level = 0; // Silence pricing fetch noise
+    }
+    
+    // Load data from each path and merge
+    const allData = [];
+    
+    for (const claudePath of allPaths) {
+        try {
+            let pathData;
+            switch (command) {
+                case 'daily':
+                    // For daily, we want session data to show project breakdown
+                    pathData = await loadSessionData({ ...options, claudePath });
+                    break;
+                case 'session':
+                    pathData = await loadSessionData({ ...options, claudePath });
+                    break;
+                case 'monthly':
+                    // Use session data for monthly too - more accurate than loadMonthlyUsageData
+                    pathData = await loadSessionData({ ...options, claudePath });
+                    break;
+                case 'blocks':
+                    pathData = await loadSessionBlockData({ ...options, claudePath });
+                    break;
+                case 'live':
+                    // Live monitoring is handled separately, should not reach here
+                    return [];
+                default:
+                    throw new Error(`Unknown command: ${command}`);
+            }
+            
+            if (pathData.length > 0) {
+                allData.push(...pathData);
+                if (!options.isJson) {
+                    console.log(`✓ ${claudePath}: ${pathData.length} records`);
+                }
+            }
+        } catch (error) {
+            if (!options.isJson) {
+                console.log(`❌ ${claudePath}: ${error.message}`);
+            }
+        }
+    }
+    
+    // Restore logger level
+    logger.level = originalLevel;
+    
+    return allData;
+}
+
+// Process session data into daily breakdown with project details
+function processDailyWithProjects(sessionData) {
+    // Group sessions by date first
+    const dateGroups = {};
+    
+    for (const session of sessionData) {
+        const date = session.lastActivity ? session.lastActivity.substring(0, 10) : 'unknown';
+        if (!dateGroups[date]) {
+            dateGroups[date] = [];
+        }
+        dateGroups[date].push(session);
+    }
+    
+    // For each date, group by project and calculate totals
+    const result = [];
+    
+    for (const [date, sessions] of Object.entries(dateGroups)) {
+        const projectGroups = {};
+        let dayTotal = 0;
+        
+        for (const session of sessions) {
+            // Extract project from sessionId (format: "-home-miko-projects-...")
+            let project = session.projectPath || 'unknown';
+            if (project === 'Unknown Project' && session.sessionId) {
+                // Convert sessionId back to path
+                const sessionPath = session.sessionId.replace(/^-/, '').replace(/-/g, '/');
+                project = sessionPath.startsWith('/') ? sessionPath : `/${sessionPath}`;
+            }
+            
+            // Get just the project name (last part of path)
+            const projectName = project.split('/').pop() || project;
+            
+            if (!projectGroups[projectName]) {
+                projectGroups[projectName] = {
+                    project: projectName,
+                    sessions: 0,
+                    totalCost: 0,
+                    totalTokens: 0,
+                };
+            }
+            
+            const group = projectGroups[projectName];
+            group.sessions++;
+            group.totalCost += session.totalCost || 0;
+            group.totalTokens += (session.inputTokens || 0) + (session.outputTokens || 0) + 
+                               (session.cacheCreationTokens || 0) + (session.cacheReadTokens || 0);
+            
+            dayTotal += session.totalCost || 0;
+        }
+        
+        result.push({
+            date,
+            projects: Object.values(projectGroups).sort((a, b) => b.totalCost - a.totalCost),
+            totalCost: dayTotal,
+            totalSessions: sessions.length,
+        });
+    }
+    
+    return result.sort((a, b) => b.date.localeCompare(a.date));
+}
+
+// Display daily breakdown with project details
+function displayDailyWithProjects(dailyData, limit = null) {
+    logger.box('Claude Code Usage Report - Daily with Project Breakdown (All Instances)');
+    
+    if (dailyData.length === 0) {
+        console.log('📊 No usage data found.');
+        return;
+    }
+    
+    // Calculate grand totals
+    const grandTotal = dailyData.reduce((sum, day) => sum + day.totalCost, 0);
+    const totalSessions = dailyData.reduce((sum, day) => sum + day.totalSessions, 0);
+    
+    console.log(`📊 ${dailyData.length} days • ${totalSessions} sessions • $${grandTotal.toFixed(2)} total\n`);
+    
+    // Show recent days (with configurable limit)
+    const displayLimit = limit || 30; // Default to 30 days, or use provided limit
+    const recentDays = dailyData.slice(0, displayLimit);
+    
+    for (const day of recentDays) {
+        console.log(`📅 ${day.date} — $${day.totalCost.toFixed(2)} (${day.totalSessions} sessions)`);
+        
+        if (day.projects.length > 0) {
+            // Show top projects for the day
+            const topProjects = day.projects.slice(0, 8); // Top 8 projects
+            for (const project of topProjects) {
+                const percentage = day.totalCost > 0 ? (project.totalCost / day.totalCost * 100) : 0;
+                console.log(`   ${project.project}: $${project.totalCost.toFixed(2)} (${percentage.toFixed(0)}%, ${project.sessions} sessions)`);
+            }
+            
+            if (day.projects.length > 8) {
+                const remaining = day.projects.slice(8);
+                const remainingCost = remaining.reduce((sum, p) => sum + p.totalCost, 0);
+                console.log(`   ... ${remaining.length} more: $${remainingCost.toFixed(2)}`);
+            }
+        }
+        
+        console.log(); // Empty line between days
+    }
+    
+    if (dailyData.length > displayLimit) {
+        console.log(`... and ${dailyData.length - displayLimit} more days`);
+    }
+}
+
+
+// Live monitoring functions with your exact design
+let terminal = { width: process.stdout.columns || 80, isTTY: process.stdout.isTTY };
+
+// Performance optimization: Cache discovered paths and session data
+let cachedPaths = null;
+let cachedActiveBlock = null;
+let lastCacheTime = 0;
+const CACHE_DURATION_MS = 30000; // Cache for 30 seconds
+
+function createProgressBar(percentage, width = 20, statusColor = '🟢') {
+    // Clamp percentage between 0 and 100
+    const pct = Math.max(0, Math.min(100, percentage));
+    
+    if (pct >= 100) {
+        const filled = width;
+        const cursor = 0;
+        const empty = 0;
+        return `${statusColor} ${'█'.repeat(filled)}${empty > 0 ? '░'.repeat(empty) : ''}`;
+    } else {
+        const filled = Math.floor(width * pct / 100);
+        const cursor = 1; // Always show cursor unless at 100%
+        const empty = Math.max(0, width - filled - cursor);
+        
+        const filledBar = '█'.repeat(filled);
+        const cursorChar = cursor ? '▓' : '';  // Medium shade block as cursor
+        const emptyBar = '░'.repeat(empty);
+        
+        return `${statusColor} ${filledBar}${cursorChar}${emptyBar}`;
+    }
+}
+
+function formatTime(minutes) {
+    if (minutes < 60) {
+        return `${Math.round(minutes)}m`;
+    }
+    const hours = Math.floor(minutes / 60);
+    const mins = Math.round(minutes % 60);
+    if (mins === 0) {
+        return `${hours}h`;
+    }
+    return `${hours}h ${mins}m`;
+}
+
+function printHeader() {
+    const bold = "\x1b[1m";
+    const reset = "\x1b[0m";
+    
+    return [
+        `${bold}[ CLAUDE USAGE MONITOR ]${reset}`,
+        "",
+    ];
+}
+
+function clearScreen() {
+    if (terminal.isTTY) {
+        process.stdout.write('\x1b[2J\x1b[H'); // Clear screen and move cursor to home
+    }
+}
+
+function hideCursor() {
+    if (terminal.isTTY) {
+        process.stdout.write('\x1b[?25l'); // Hide cursor
+    }
+}
+
+function showCursor() {
+    if (terminal.isTTY) {
+        process.stdout.write('\x1b[?25h'); // Show cursor
+    }
+}
+
+async function findActiveSessionBlock() {
+    try {
+        const now = Date.now();
+        
+        // Use cached paths if available and recent
+        let allPaths;
+        if (cachedPaths && (now - lastCacheTime) < CACHE_DURATION_MS) {
+            allPaths = cachedPaths;
+        } else {
+            allPaths = await getAllClaudePaths();
+            cachedPaths = allPaths;
+            lastCacheTime = now;
+        }
+        
+        // Load session blocks from all paths
+        for (const claudePath of allPaths) {
+            try {
+                // Suppress logger during live monitoring to reduce console noise
+                const originalLevel = logger.level;
+                logger.level = 0; // Silence all logs
+                
+                const blocks = await loadSessionBlockData({ claudePath, recent: true });
+                
+                logger.level = originalLevel; // Restore logger
+                
+                // Find active block
+                const activeBlock = blocks.find(block => {
+                    const currentTime = new Date();
+                    const endTime = new Date(block.endTime);
+                    return currentTime < endTime; // Block is still active
+                });
+                
+                if (activeBlock) {
+                    return activeBlock;
+                }
+            } catch (error) {
+                // Skip failed paths silently
+                continue;
+            }
+        }
+        
+        return null;
+    } catch (error) {
+        return null;
+    }
+}
+
+async function runLiveMonitor() {
+    const tokenLimit = 880000; // Default to Max20 limit
+    const budgetLimit = tokenLimit * 0.0015; // ~$1.50 per 1000 tokens
+    
+    hideCursor();
+    
+    // Handle graceful exit
+    process.on('SIGINT', () => {
+        showCursor();
+        console.log('\n\n\x1b[96mMonitoring stopped.\x1b[0m');
+        process.exit(0);
+    });
+    
+    process.on('SIGTERM', () => {
+        showCursor();
+        process.exit(0);
+    });
+    
+    while (true) {
+        clearScreen();
+        
+        const activeBlock = await findActiveSessionBlock();
+        
+        if (!activeBlock) {
+            // No active session - show waiting state
+            const header = printHeader();
+            console.log(header.join('\n'));
+            console.log('⚡ Tokens:  🟢 ▓░░░░░░░░░░░░░░░░░░░ 0 / 880,000');
+            console.log('💲 Budget:  🟢 ▓░░░░░░░░░░░░░░░░░░░ $0.00 / $1320.00');  
+            console.log('♻️  Reset:   🕐 ░░░░░░░░░░░░░░░░░░░░ 0m');
+            console.log('');
+            console.log('🔥 0.0 tok/min | 💰 $0.00/hour');
+            console.log('');
+            
+            const now = new Date();
+            const currentTime = now.toLocaleTimeString('en-US', { 
+                hour: '2-digit', 
+                minute: '2-digit', 
+                hour12: false 
+            });
+            console.log(`🕐 ${currentTime} | 🏁 No session | ♻️  Next reset`);
+            console.log('');
+            console.log('📝 No active session');
+            
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            continue;
+        }
+        
+        // Calculate metrics for active session
+        const now = new Date();
+        const startTime = new Date(activeBlock.startTime);
+        const endTime = new Date(activeBlock.endTime);
+        
+        const totalTokens = activeBlock.totalTokens || 0;
+        const costUsed = activeBlock.costUSD || 0;
+        
+        // Session progress (elapsed vs total duration)
+        const totalSessionMinutes = (endTime.getTime() - startTime.getTime()) / (1000 * 60);
+        const elapsedMinutes = Math.max(0, (now.getTime() - startTime.getTime()) / (1000 * 60));
+        const remainingMinutes = Math.max(0, (endTime.getTime() - now.getTime()) / (1000 * 60));
+        
+        // Token progress
+        const tokenPercentage = (totalTokens / tokenLimit) * 100;
+        const tokenStatus = tokenPercentage < 70 ? '🟢' : tokenPercentage < 90 ? '🟡' : '🔴';
+        
+        // Budget progress  
+        const budgetPercentage = (costUsed / budgetLimit) * 100;
+        const budgetStatus = budgetPercentage < 70 ? '🟢' : budgetPercentage < 90 ? '🟡' : '🔴';
+        
+        // Reset progress (how much of session time has elapsed)
+        const resetPercentage = totalSessionMinutes > 0 ? (elapsedMinutes / totalSessionMinutes) * 100 : 0;
+        
+        // Calculate burn rate (simple approximation)
+        const burnRate = elapsedMinutes > 0 ? totalTokens / elapsedMinutes : 0;
+        const costBurnRate = elapsedMinutes > 0 ? (costUsed / elapsedMinutes) * 60 : 0; // per hour
+        
+        // Format time displays
+        const currentTime = now.toLocaleTimeString('en-US', { 
+            hour: '2-digit', 
+            minute: '2-digit', 
+            hour12: false 
+        });
+        
+        const resetTime = endTime.toLocaleTimeString('en-US', { 
+            hour: '2-digit', 
+            minute: '2-digit', 
+            hour12: false 
+        });
+        
+        // Predict when tokens will run out
+        let predictedEndStr;
+        if (burnRate > 0 && totalTokens < tokenLimit) {
+            const tokensLeft = tokenLimit - totalTokens;
+            const minutesToDepletion = tokensLeft / burnRate;
+            const predictedEnd = new Date(now.getTime() + minutesToDepletion * 60 * 1000);
+            predictedEndStr = predictedEnd.toLocaleTimeString('en-US', { 
+                hour: '2-digit', 
+                minute: '2-digit', 
+                hour12: false 
+            });
+        } else if (totalTokens >= tokenLimit) {
+            predictedEndStr = "LIMIT HIT";
+        } else {
+            predictedEndStr = resetTime;
+        }
+        
+        // Status message logic
+        let statusMessage = "⛵ Smooth sailing...";
+        if (totalTokens > tokenLimit) {
+            statusMessage = `🚨 Session tokens exceeded limit! (${totalTokens.toLocaleString()} > ${tokenLimit.toLocaleString()})`;
+        } else if (costBurnRate > 0 && budgetPercentage > 90) {
+            statusMessage = "💸 High session cost!";
+        } else if (tokenPercentage > 90) {
+            statusMessage = "🔥 High session usage!";
+        }
+        
+        // Display the monitor matching your exact layout
+        const header = printHeader();
+        console.log(header.join('\n'));
+        
+        console.log(`⚡ Tokens:  ${createProgressBar(tokenPercentage, 20, tokenStatus)} ${totalTokens.toLocaleString()} / ${tokenLimit.toLocaleString()}`);
+        console.log(`💲 Budget:  ${createProgressBar(budgetPercentage, 20, budgetStatus)} $${costUsed.toFixed(2)} / $${budgetLimit.toFixed(2)}`);
+        console.log(`♻️  Reset:   ${createProgressBar(resetPercentage, 20, '🕐')} ${formatTime(remainingMinutes)}`);
+        console.log('');
+        console.log(`🔥 ${burnRate.toFixed(1)} tok/min | 💰 $${costBurnRate.toFixed(2)}/hour`);
+        console.log('');
+        console.log(`🕐 ${currentTime} | 🏁 ${predictedEndStr} | ♻️  ${resetTime}`);
+        console.log('');
+        console.log(statusMessage);
+        
+        // Wait 3 seconds before next update
+        await new Promise(resolve => setTimeout(resolve, 3000));
+    }
+}
+
+// Parse command line arguments
+function parseArgs(args) {
+    const result = {
+        command: 'daily',
+        isJson: false,
+        limit: null,
+        options: {}
+    };
+    
+    for (let i = 0; i < args.length; i++) {
+        const arg = args[i];
+        
+        if (arg === '--json') {
+            result.isJson = true;
+        } else if (arg === '--last') {
+            const nextArg = args[i + 1];
+            if (nextArg && !nextArg.startsWith('--')) {
+                result.limit = parseInt(nextArg, 10);
+                i++; // Skip next argument
+            }
+        } else if (arg === '--week') {
+            const now = new Date();
+            const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+            result.options.since = weekAgo.toISOString().substring(0, 10).replace(/-/g, '');
+        } else if (arg === '--month') {
+            const now = new Date();
+            const monthAgo = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
+            result.options.since = monthAgo.toISOString().substring(0, 10).replace(/-/g, '');
+        } else if (arg === '--year') {
+            const now = new Date();
+            const year = now.getFullYear();
+            result.options.since = `${year}0101`;
+            result.options.until = `${year}1231`;
+        } else if (arg === '--help' || arg === '-h') {
+            result.showHelp = true;
+        } else if (!arg.startsWith('--') && ['daily', 'monthly', 'session', 'blocks', 'live'].includes(arg)) {
+            result.command = arg;
+        } else if (!arg.startsWith('--')) {
+            // Handle month names or years
+            const monthNames = ['january', 'february', 'march', 'april', 'may', 'june',
+                              'july', 'august', 'september', 'october', 'november', 'december'];
+            const monthIndex = monthNames.indexOf(arg.toLowerCase());
+            
+            if (monthIndex !== -1) {
+                const now = new Date();
+                const year = now.getFullYear();
+                const month = String(monthIndex + 1).padStart(2, '0');
+                result.options.since = `${year}${month}01`;
+                result.options.until = `${year}${month}31`;
+            } else if (/^\d{4}$/.test(arg)) {
+                // Year format (e.g., "2024")
+                result.options.since = `${arg}0101`;
+                result.options.until = `${arg}1231`;
+            }
+        }
+    }
+    
+    return result;
+}
+
+// Main execution
+async function main() {
+    const args = process.argv.slice(2);
+    const parsed = parseArgs(args);
+    const { command, isJson, limit, options } = parsed;
+    
+    // Handle help
+    if (parsed.showHelp) {
+        console.log(`
+claude-usage - Claude Usage: Aggregate Claude usage across all VMs
+
+USAGE:
+  claude-usage [COMMAND] [OPTIONS]
+
+COMMANDS:
+  daily            Show usage report grouped by date (default)
+  monthly          Show usage report grouped by month  
+  session          Show usage report grouped by conversation session
+  blocks           Show usage report grouped by session billing blocks
+  live             Real-time monitoring with beautiful progress bars
+
+OPTIONS:
+  --json           Output in JSON format
+  --last N         Show last N entries (e.g., --last 30)
+  --week           Show this week's data
+  --month          Show this month's data 
+  --year           Show this year's data
+  january          Show January data
+  2024             Show 2024 data
+  --help, -h       Show this help message
+
+EXAMPLES:
+  claude-usage daily                    # Daily usage across all Claude instances
+  claude-usage monthly --json           # Monthly usage in JSON format
+  claude-usage session                  # Session usage across all VMs
+  claude-usage blocks                   # 5-hour billing blocks usage
+  claude-usage live                     # Real-time monitoring dashboard
+
+Aggregates usage from:
+  - ~/.claude (main instance)
+  - ~/.claude/vms/* (all VM instances)
+`);
+        process.exit(0);
+    }
+    
+    if (isJson) {
+        logger.level = 0;
+    }
+    
+    // Handle live monitoring
+    if (command === 'live') {
+        if (isJson) {
+            console.error('Error: Live monitoring does not support --json output');
+            process.exit(1);
+        }
+        await runLiveMonitor();
+        return;
+    }
+    
+    try {
+        const data = await loadAggregatedData(command, { isJson, ...options });
+        
+        if (data.length === 0) {
+            if (isJson) {
+                log(JSON.stringify([]));
+            } else {
+                logger.warn('No Claude usage data found across all instances.');
+            }
+            process.exit(0);
+        }
+        
+        // Handle daily breakdown with projects
+        if (command === 'daily') {
+            const dailyData = processDailyWithProjects(data);
+            
+            if (isJson) {
+                log(JSON.stringify({ daily: dailyData }, null, 2));
+            } else {
+                displayDailyWithProjects(dailyData, limit);
+            }
+            return;
+        }
+        
+        
+        // Handle different command types with appropriate calculations and display
+        if (command === 'blocks') {
+            // Blocks have different structure - use block-specific calculations
+            const totalCost = data.reduce((sum, block) => sum + (block.costUSD || 0), 0);
+            const totalTokens = data.reduce((sum, block) => {
+                const blockTokens = (block.tokenCounts?.inputTokens || 0) + 
+                                   (block.tokenCounts?.outputTokens || 0) + 
+                                   (block.tokenCounts?.cacheCreationInputTokens || 0) + 
+                                   (block.tokenCounts?.cacheReadInputTokens || 0);
+                return sum + blockTokens;
+            }, 0);
+            
+            if (isJson) {
+                const jsonOutput = {
+                    blocks: data,
+                    totals: { totalCost, totalTokens }
+                };
+                log(JSON.stringify(jsonOutput, null, 2));
+            } else {
+                logger.box(`Claude Code Token Usage Report - Blocks (All Instances)`);
+                
+                console.log(`📊 Total Usage Summary:`);
+                console.log(`   Records: ${data.length}`);
+                console.log(`   Total Cost: $${totalCost.toFixed(2)}`);
+                console.log(`   Total Tokens: ${totalTokens.toLocaleString()}`);
+                console.log();
+                
+                // Show recent blocks (with limit support)
+                const displayLimit = limit || 10;
+                const recentData = data.slice(-displayLimit);
+                console.log(`📅 Recent blocks usage (last ${displayLimit}):`);
+                recentData.forEach(block => {
+                    const blockTokens = (block.tokenCounts?.inputTokens || 0) + 
+                                       (block.tokenCounts?.outputTokens || 0) + 
+                                       (block.tokenCounts?.cacheCreationInputTokens || 0) + 
+                                       (block.tokenCounts?.cacheReadInputTokens || 0);
+                    const startTime = new Date(block.startTime).toLocaleString();
+                    console.log(`   ${startTime}: $${(block.costUSD || 0).toFixed(2)} (${blockTokens.toLocaleString()} tokens)`);
+                });
+            }
+        } else if (command === 'session') {
+            // Sessions have sessionId and projectPath instead of date
+            // Sort by lastActivity date (most recent first)
+            data.sort((a, b) => (b.lastActivity || '').localeCompare(a.lastActivity || ''));
+            const totals = calculateTotals(data);
+            
+            if (isJson) {
+                const jsonOutput = {
+                    session: data.map(item => ({
+                        ...item,
+                        totalTokens: getTotalTokens(item),
+                    })),
+                    totals: createTotalsObject(totals),
+                };
+                log(JSON.stringify(jsonOutput, null, 2));
+            } else {
+                logger.box(`Claude Code Token Usage Report - Session (All Instances)`);
+                
+                console.log(`📊 Total Usage Summary:`);
+                console.log(`   Records: ${data.length}`);
+                console.log(`   Total Cost: $${totals.totalCost.toFixed(2)}`);
+                console.log(`   Total Tokens: ${getTotalTokens(totals).toLocaleString()}`);
+                console.log();
+                
+                // Show recent sessions (with limit support)
+                const displayLimit = limit || 10;
+                const recentData = data.slice(0, displayLimit); // Take first N since data is already sorted newest first
+                console.log(`📅 Recent session usage (last ${displayLimit}):`);
+                recentData.forEach(item => {
+                    let sessionName;
+                    
+                    if (item.sessionId && item.sessionId.startsWith('-')) {
+                        // Parse sessionId like "-home-miko-projects-utils-claude-usage-monitor"
+                        const pathParts = item.sessionId.substring(1).split('-'); // Remove leading '-' and split
+                        const projectName = pathParts[pathParts.length - 1] || 'unknown'; // Last part is project name
+                        sessionName = projectName;
+                    } else if (item.projectPath && item.projectPath !== 'Unknown Project') {
+                        const projectName = item.projectPath.split('/').pop() || item.projectPath;
+                        sessionName = projectName;
+                    } else {
+                        sessionName = item.sessionId || item.projectPath || 'Unknown Session';
+                    }
+                    
+                    const timestamp = item.lastActivity || 'Unknown Date';
+                    console.log(`   ${timestamp} | ${sessionName}: $${item.totalCost.toFixed(2)} (${getTotalTokens(item).toLocaleString()} tokens)`);
+                });
+            }
+        } else if (command === 'monthly') {
+            // Monthly: Use same session data as daily but aggregate by month
+            const dailyData = processDailyWithProjects(data);
+            const monthlyGroups = {};
+            
+            // Group daily data by month (YYYY-MM)
+            for (const day of dailyData) {
+                const month = day.date.substring(0, 7); // Extract YYYY-MM from YYYY-MM-DD
+                if (!monthlyGroups[month]) {
+                    monthlyGroups[month] = {
+                        month,
+                        totalCost: 0,
+                        totalSessions: 0,
+                        inputTokens: 0,
+                        outputTokens: 0,
+                        cacheCreationTokens: 0,
+                        cacheReadTokens: 0,
+                    };
+                }
+                
+                const group = monthlyGroups[month];
+                group.totalCost += day.totalCost || 0;
+                group.totalSessions += day.totalSessions || 0;
+            }
+            
+            // Convert to array and sort
+            const aggregatedData = Object.values(monthlyGroups)
+                .sort((a, b) => a.month.localeCompare(b.month));
+                
+            // Calculate totals for display
+            const totalCost = aggregatedData.reduce((sum, item) => sum + item.totalCost, 0);
+            const totalSessions = aggregatedData.reduce((sum, item) => sum + item.totalSessions, 0);
+            
+            if (isJson) {
+                const jsonOutput = {
+                    monthly: aggregatedData,
+                    totals: { totalCost, totalSessions }
+                };
+                log(JSON.stringify(jsonOutput, null, 2));
+            } else {
+                logger.box(`Claude Code Token Usage Report - Monthly (All Instances)`);
+                
+                console.log(`📊 Total Usage Summary:`);
+                console.log(`   Records: ${aggregatedData.length}`);
+                console.log(`   Total Cost: $${totalCost.toFixed(2)}`);
+                console.log(`   Total Sessions: ${totalSessions}`);
+                console.log();
+                
+                // Show recent months (with limit support)
+                const displayLimit = limit || 10;
+                const recentData = aggregatedData.slice(-displayLimit);
+                console.log(`📅 Recent monthly usage (last ${displayLimit}):`);
+                recentData.forEach(item => {
+                    console.log(`   ${item.month}: $${item.totalCost.toFixed(2)} (${item.totalSessions} sessions)`);
+                });
+            }
+        } else {
+            // Handle daily and other commands (standard logic)
+            data.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+            const totals = calculateTotals(data);
+            
+            if (isJson) {
+                const jsonOutput = {
+                    [command]: data.map(item => ({
+                        ...item,
+                        totalTokens: getTotalTokens(item),
+                    })),
+                    totals: createTotalsObject(totals),
+                };
+                log(JSON.stringify(jsonOutput, null, 2));
+            } else {
+                logger.box(`Claude Code Token Usage Report - ${command.charAt(0).toUpperCase() + command.slice(1)} (All Instances)`);
+                
+                console.log(`📊 Total Usage Summary:`);
+                console.log(`   Records: ${data.length}`);
+                console.log(`   Total Cost: $${totals.totalCost.toFixed(2)}`);
+                console.log(`   Total Tokens: ${getTotalTokens(totals).toLocaleString()}`);
+                console.log();
+                
+                // Show recent entries (with limit support)
+                const displayLimit = limit || 10;
+                const recentData = data.slice(-displayLimit);
+                console.log(`📅 Recent ${command} usage (last ${displayLimit}):`);
+                recentData.forEach(item => {
+                    const dateOrMonth = item.month || item.date || 'Unknown';
+                    console.log(`   ${dateOrMonth}: $${item.totalCost.toFixed(2)} (${getTotalTokens(item).toLocaleString()} tokens)`);
+                });
+            }
+        }
+        
+    } catch (error) {
+        console.error('Error:', error.message);
+        process.exit(1);
+    }
+}
+
+main();
