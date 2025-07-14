@@ -1,3 +1,2 @@
 [console_scripts]
-claude-usage-max = claude_usage_max:main
-cusage = claude_usage_max:main
+claude-usage = claude_usage_max:main

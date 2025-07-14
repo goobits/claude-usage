@@ -27,8 +27,7 @@ classifiers = [
 ]
 
 [project.scripts]
-claude-usage-max = "claude_usage_max:main"
-cusage = "claude_usage_max:main"
+claude-usage = "claude_usage_max:main"
 
 [project.urls]
 Homepage = "https://github.com/miko/claude-usage-max"
