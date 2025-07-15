@@ -4,11 +4,8 @@ use crate::dedup::{DeduplicationEngine, ProcessOptions};
 use crate::display::DisplayManager;
 use crate::monitor::LiveMonitor;
 use anyhow::Result;
-use chrono::{DateTime, Utc};
-use std::collections::HashMap;
 
 pub struct ClaudeUsageAnalyzer {
-    cost_mode: CostMode,
     parser: FileParser,
     dedup_engine: DeduplicationEngine,
     display_manager: DisplayManager,
@@ -18,7 +15,6 @@ pub struct ClaudeUsageAnalyzer {
 impl ClaudeUsageAnalyzer {
     pub fn new(cost_mode: CostMode) -> Self {
         Self {
-            cost_mode: cost_mode.clone(),
             parser: FileParser::new(cost_mode.clone()),
             dedup_engine: DeduplicationEngine::new(cost_mode.clone()),
             display_manager: DisplayManager::new(),

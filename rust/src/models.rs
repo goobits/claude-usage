@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
-use chrono::{DateTime, Utc};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageEntry {
@@ -127,20 +126,6 @@ pub struct PricingData {
     pub cache_read_input_token_cost: Option<f64>,
 }
 
-#[derive(Debug, Clone)]
-pub struct CurrentSessionData {
-    pub session_id: String,
-    pub total_cost: f64,
-    pub total_tokens: u32,
-    pub start_time: Option<DateTime<Utc>>,
-    pub last_activity: Option<DateTime<Utc>>,
-    pub file_modified: DateTime<Utc>,
-    pub tokens_by_minute: HashMap<String, u32>,
-    pub cost_by_minute: HashMap<String, f64>,
-    pub models_used: HashSet<String>,
-    pub real_burn_rate_tokens: f64,
-    pub real_burn_rate_cost: f64,
-}
 
 #[derive(Debug, Clone)]
 pub enum CostMode {

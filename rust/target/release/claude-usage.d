@@ -1,0 +1,1 @@
+/workspace/rust/target/release/claude-usage: /workspace/rust/src/analyzer.rs /workspace/rust/src/dedup.rs /workspace/rust/src/display.rs /workspace/rust/src/lib.rs /workspace/rust/src/main.rs /workspace/rust/src/models.rs /workspace/rust/src/monitor.rs /workspace/rust/src/parser.rs /workspace/rust/src/pricing.rs /workspace/rust/src/utils.rs

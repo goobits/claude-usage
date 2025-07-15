@@ -1,20 +1,17 @@
 use crate::models::*;
 use anyhow::{Result, Context};
-use chrono::{DateTime, Utc, NaiveDateTime, Local};
-use std::collections::HashMap;
+use chrono::{DateTime, Utc, NaiveDateTime};
 use std::fs::{File, metadata};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 // use rayon::prelude::*; // Commented out as not currently used
 use glob::glob;
 
-pub struct FileParser {
-    cost_mode: CostMode,
-}
+pub struct FileParser {}
 
 impl FileParser {
-    pub fn new(cost_mode: CostMode) -> Self {
-        Self { cost_mode }
+    pub fn new(_cost_mode: CostMode) -> Self {
+        Self {}
     }
 
     pub fn discover_claude_paths(&self) -> Result<Vec<PathBuf>> {

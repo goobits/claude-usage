@@ -1,0 +1,2 @@
+[console_scripts]
+claude-usage = claude_usage:main

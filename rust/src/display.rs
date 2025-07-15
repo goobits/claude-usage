@@ -1,5 +1,4 @@
 use crate::models::*;
-use colored::*;
 use crate::utils::format_with_commas;
 use std::collections::HashMap;
 use serde_json;
@@ -37,7 +36,7 @@ impl DisplayManager {
             // Show top 8 projects
             for project in day.projects.iter().take(8) {
                 let percentage = if day.total_cost > 0.0 {
-                    (project.total_cost / day.total_cost * 100.0)
+                    project.total_cost / day.total_cost * 100.0
                 } else {
                     0.0
                 };

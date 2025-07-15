@@ -7,7 +7,6 @@ use std::time::Duration;
 use tokio::time;
 
 pub struct LiveMonitor {
-    cost_mode: CostMode,
     parser: FileParser,
     cached_blocks: Option<Vec<SessionBlock>>,
     cache_time: Option<std::time::Instant>,
@@ -16,7 +15,6 @@ pub struct LiveMonitor {
 impl LiveMonitor {
     pub fn new(cost_mode: CostMode) -> Self {
         Self {
-            cost_mode: cost_mode.clone(),
             parser: FileParser::new(cost_mode),
             cached_blocks: None,
             cache_time: None,
@@ -120,9 +118,9 @@ impl LiveMonitor {
         let cost_used = block.cost_usd;
         
         // Calculate session progress
-        let total_session_minutes = (end_time - start_time).num_minutes() as f64;
-        let elapsed_minutes = (now - start_time).num_minutes().max(0) as f64;
-        let remaining_minutes = (end_time - now).num_minutes().max(0) as f64;
+        let total_session_minutes = (end_time - start_time).num_seconds() as f64 / 60.0;
+        let elapsed_minutes = (now - start_time).num_seconds().max(0) as f64 / 60.0;
+        let remaining_minutes = (end_time - now).num_seconds().max(0) as f64 / 60.0;
         
         // Progress percentages
         let token_percentage = (total_tokens as f64 / token_limit as f64) * 100.0;
@@ -234,8 +232,8 @@ impl LiveMonitor {
         let total_tokens = block.token_counts.total();
         let cost_used = block.cost_usd;
         
-        let elapsed_minutes = (now - start_time).num_minutes().max(0) as f64;
-        let remaining_minutes = (end_time - now).num_minutes().max(0) as f64;
+        let elapsed_minutes = (now - start_time).num_seconds().max(0) as f64 / 60.0;
+        let remaining_minutes = (end_time - now).num_seconds().max(0) as f64 / 60.0;
         
         let burn_rate = if elapsed_minutes > 0.0 {
             total_tokens as f64 / elapsed_minutes

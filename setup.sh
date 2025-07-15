@@ -165,7 +165,7 @@ uninstall_claude_usage() {
 }
 
 # Parse command line arguments
-case "${1:-install}" in
+case "${1:-help}" in
     install)
         install_claude_usage
         ;;
