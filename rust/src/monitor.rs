@@ -408,7 +408,10 @@ impl LiveMonitor {
                 
                 for entry in entries {
                     // Skip entries with no usage data
-                    if entry.message.usage.input_tokens == 0 && entry.message.usage.output_tokens == 0 {
+                    let Some(usage) = &entry.message.usage else {
+                        continue;  // Skip entries without usage data
+                    };
+                    if usage.input_tokens == 0 && usage.output_tokens == 0 {
                         continue;
                     }
                     
@@ -432,20 +435,26 @@ impl LiveMonitor {
                         }
                         
                         // Aggregate usage data
-                        total_input_tokens += entry.message.usage.input_tokens;
-                        total_output_tokens += entry.message.usage.output_tokens;
-                        total_cache_creation_tokens += entry.message.usage.cache_creation_input_tokens;
-                        total_cache_read_tokens += entry.message.usage.cache_read_input_tokens;
+                        if let Some(usage) = &entry.message.usage {
+                            total_input_tokens += usage.input_tokens;
+                            total_output_tokens += usage.output_tokens;
+                            total_cache_creation_tokens += usage.cache_creation_input_tokens;
+                            total_cache_read_tokens += usage.cache_read_input_tokens;
+                        }
                         
                         // Calculate cost
                         if let Some(cost) = entry.cost_usd {
                             total_cost += cost;
                         } else {
                             // Fallback to cost calculation from tokens
-                            let entry_cost = crate::pricing::PricingManager::calculate_cost_from_tokens(
-                                &entry.message.usage, 
-                                &entry.message.model
-                            ).await;
+                            let entry_cost = if let Some(usage) = &entry.message.usage {
+                                crate::pricing::PricingManager::calculate_cost_from_tokens(
+                                    usage, 
+                                    &entry.message.model
+                                ).await
+                            } else {
+                                0.0
+                            };
                             total_cost += entry_cost;
                         }
                     }

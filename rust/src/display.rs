@@ -1,5 +1,6 @@
 use crate::models::*;
 use colored::*;
+use crate::utils::format_with_commas;
 use std::collections::HashMap;
 use serde_json;
 
@@ -107,7 +108,7 @@ impl DisplayManager {
         println!("\n📊 Total Usage Summary:");
         println!("   Records: {}", sorted_data.len());
         println!("   Total Cost: ${:.2}", total_cost);
-        println!("   Total Tokens: {}", total_tokens);
+        println!("   Total Tokens: {}", format_with_commas(total_tokens));
         println!();
         
         let display_limit = limit.unwrap_or(10);
@@ -118,7 +119,7 @@ impl DisplayManager {
             let tokens = session.input_tokens + session.output_tokens + 
                         session.cache_creation_tokens + session.cache_read_tokens;
             println!("   {} | {}: ${:.2} ({} tokens)", 
-                     session.last_activity, session_name, session.total_cost, tokens);
+                     session.last_activity, session_name, session.total_cost, format_with_commas(tokens));
         }
     }
 
@@ -138,8 +139,8 @@ impl DisplayManager {
         
         println!("\n📊 Total Usage Summary:");
         println!("   Records: {}", blocks.len());
-        println!("   Total Cost: ${:.2}", total_cost);
-        println!("   Total Tokens: {}", total_tokens);
+        println!("   Total Cost: ${:.2}", if total_cost == 0.0 { 0.0 } else { total_cost });
+        println!("   Total Tokens: {}", format_with_commas(total_tokens));
         println!();
         
         let display_limit = limit.unwrap_or(10);
@@ -154,7 +155,7 @@ impl DisplayManager {
             };
             
             let tokens = block.token_counts.total();
-            println!("   {}: ${:.2} ({} tokens)", start_time, block.cost_usd, tokens);
+            println!("   {}: ${:.2} ({} tokens)", start_time, block.cost_usd, format_with_commas(tokens));
         }
     }
 

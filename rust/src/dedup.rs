@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use anyhow::Result;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, Local};
 use rayon::prelude::*;
 
 pub struct DeduplicationEngine {
@@ -34,7 +34,7 @@ impl DeduplicationEngine {
         options: &ProcessOptions,
     ) -> Result<Vec<SessionOutput>> {
         let parser = FileParser::new(self.cost_mode.clone());
-        let mut sessions_by_dir: HashMap<String, SessionData> = HashMap::new();
+        let mut sessions_by_dir: HashMap<PathBuf, SessionData> = HashMap::new();
         
         let need_timestamps = matches!(options.command.as_str(), "daily" | "session" | "monthly");
         let mut total_entries_processed = 0;
@@ -68,8 +68,11 @@ impl DeduplicationEngine {
                 _processed_files += 1;
             
             for entry in entries {
-                // Check if entry has usage data
-                if entry.message.usage.input_tokens == 0 && entry.message.usage.output_tokens == 0 {
+                // Check if entry has usage data (match Python behavior)
+                let Some(usage) = &entry.message.usage else {
+                    continue;  // Skip entries without usage data
+                };
+                if usage.input_tokens == 0 && usage.output_tokens == 0 {
                     continue;
                 }
                 
@@ -144,22 +147,26 @@ impl DeduplicationEngine {
                     .unwrap_or("unknown");
                 let (session_id, project_name) = parser.extract_session_info(session_dir_name);
                 
-                // Get or create session data
-                let session_data = sessions_by_dir.entry(session_dir_name.to_string())
+                // Get or create session data (use full path like Python)
+                let session_data = sessions_by_dir.entry(session_dir.clone())
                     .or_insert_with(|| SessionData::new(session_id, project_name));
                 
                 // Aggregate usage data
-                session_data.input_tokens += entry.message.usage.input_tokens;
-                session_data.output_tokens += entry.message.usage.output_tokens;
-                session_data.cache_creation_tokens += entry.message.usage.cache_creation_input_tokens;
-                session_data.cache_read_tokens += entry.message.usage.cache_read_input_tokens;
+                if let Some(usage) = &entry.message.usage {
+                    session_data.input_tokens += usage.input_tokens;
+                    session_data.output_tokens += usage.output_tokens;
+                    session_data.cache_creation_tokens += usage.cache_creation_input_tokens;
+                    session_data.cache_read_tokens += usage.cache_read_input_tokens;
+                }
                 session_data.total_cost += entry_cost;
                 session_data.models_used.insert(entry.message.model.clone());
                 
                 // Update last activity if needed
                 if need_timestamps {
                     if let Ok(timestamp) = parser.parse_timestamp(&entry.timestamp) {
-                        let activity_date = timestamp.format("%Y-%m-%d").to_string();
+                        // Convert to local timezone like Python version does
+                        let local_timestamp = timestamp.with_timezone(&Local);
+                        let activity_date = local_timestamp.format("%Y-%m-%d").to_string();
                         if session_data.last_activity.is_none() || 
                            session_data.last_activity.as_ref().unwrap() < &activity_date {
                             session_data.last_activity = Some(activity_date);
@@ -206,13 +213,19 @@ impl DeduplicationEngine {
                 entry.cost_usd.unwrap_or(0.0)
             }
             CostMode::Calculate => {
-                PricingManager::calculate_cost_from_tokens(&entry.message.usage, &entry.message.model).await
+                if let Some(usage) = &entry.message.usage {
+                    PricingManager::calculate_cost_from_tokens(usage, &entry.message.model).await
+                } else {
+                    0.0
+                }
             }
             CostMode::Auto => {
                 if let Some(cost) = entry.cost_usd {
                     cost
+                } else if let Some(usage) = &entry.message.usage {
+                    PricingManager::calculate_cost_from_tokens(usage, &entry.message.model).await
                 } else {
-                    PricingManager::calculate_cost_from_tokens(&entry.message.usage, &entry.message.model).await
+                    0.0
                 }
             }
         }

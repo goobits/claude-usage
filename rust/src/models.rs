@@ -16,7 +16,7 @@ pub struct UsageEntry {
 pub struct MessageData {
     pub id: String,
     pub model: String,
-    pub usage: UsageData,
+    pub usage: Option<UsageData>,  // Make usage optional to match Python behavior
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

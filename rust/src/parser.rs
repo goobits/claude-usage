@@ -1,6 +1,6 @@
 use crate::models::*;
 use anyhow::{Result, Context};
-use chrono::{DateTime, Utc, NaiveDateTime};
+use chrono::{DateTime, Utc, NaiveDateTime, Local};
 use std::collections::HashMap;
 use std::fs::{File, metadata};
 use std::io::{BufRead, BufReader};
@@ -262,6 +262,10 @@ impl FileParser {
     }
 
     pub fn create_unique_hash(&self, entry: &UsageEntry) -> Option<String> {
+        // Match Python behavior: return None if either ID is empty
+        if entry.message.id.is_empty() || entry.request_id.is_empty() {
+            return None;
+        }
         Some(format!("{}:{}", entry.message.id, entry.request_id))
     }
 
