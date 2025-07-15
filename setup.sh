@@ -117,51 +117,47 @@ install_claude_usage() {
 }
 
 uninstall_claude_usage() {
-    echo "👋 So long, and thanks for all the insights!"
-    echo
-    echo "We're sorry to see you go. Let's cleanly remove claude-usage"
-    echo "from your system while keeping your precious data intact."
+    echo "🔍 Checking for claude-usage installations..."
     echo
 
     # Check if binary exists
     if [ -f "$BINARY_PATH" ]; then
-        echo "📦 Removing claude-usage from $BINARY_PATH..."
+        echo "📦 Found claude-usage at $BINARY_PATH"
         rm -f "$BINARY_PATH"
-        echo "✅ Successfully removed the binary"
+        echo "✅ Successfully removed claude-usage"
+        REMOVED_SOMETHING=true
     else
-        echo "🤔 Hmm, we couldn't find claude-usage at $BINARY_PATH"
-        echo "   It might have been installed elsewhere or already removed"
+        echo "ℹ️  No claude-usage found at $BINARY_PATH"
+        REMOVED_SOMETHING=false
     fi
 
     # Check if it's still in PATH (might be installed elsewhere)
     if command -v claude-usage &> /dev/null; then
         CURRENT_PATH=$(which claude-usage)
-        echo
-        echo "🔍 Wait! We found another claude-usage installation at:"
-        echo "   $CURRENT_PATH"
-        echo
-        echo "   You might want to remove this one manually if it's no longer needed"
-    else
-        echo "✅ Perfect! claude-usage has been completely removed from your system"
+        echo "🔍 Found another installation at: $CURRENT_PATH"
+        echo "   You may want to remove this one manually if needed"
+        REMOVED_SOMETHING=true
     fi
 
     # Clean up build artifacts (optional)
     if [ -d "rust/target" ]; then
         echo
-        read -p "🧹 Would you like to clean up build artifacts too? [y/N]: " -n 1 -r
+        read -p "🧹 Clean up build artifacts? [y/N]: " -n 1 -r
         echo
         if [[ $REPLY =~ ^[Yy]$ ]]; then
-            echo "🧹 Cleaning up build artifacts..."
             rm -rf rust/target
-            echo "✨ Build artifacts cleaned - your workspace is now pristine!"
-        else
-            echo "👍 No worries! Build artifacts kept in case you want to reinstall later"
+            echo "✅ Build artifacts cleaned"
+            REMOVED_SOMETHING=true
         fi
     fi
 
     echo
-    echo "🎉 Uninstallation complete!"
-    echo "💡 You can always reinstall by running: ./setup.sh install"
+    if [ "$REMOVED_SOMETHING" = true ]; then
+        echo "🎉 Cleanup complete!"
+    else
+        echo "ℹ️  Nothing to remove - claude-usage was not found"
+    fi
+    echo "💡 Run './setup.sh install' to install claude-usage"
 }
 
 # Parse command line arguments
