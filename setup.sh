@@ -79,8 +79,23 @@ install_claude_usage() {
 
     echo
     echo "📦 Installing claude-usage to your local bin..."
-    cp target/release/claude-usage "$BINARY_PATH"
-    chmod +x "$BINARY_PATH"
+    
+    # Check if the binary was actually built
+    if [ ! -f "target/release/claude-usage" ]; then
+        echo "❌ Error: Binary not found at target/release/claude-usage"
+        echo "   Build may have failed"
+        exit 1
+    fi
+    
+    # Copy the binary
+    if cp target/release/claude-usage "$BINARY_PATH"; then
+        chmod +x "$BINARY_PATH"
+        echo "✅ Successfully installed claude-usage to $BINARY_PATH"
+    else
+        echo "❌ Error: Failed to copy binary to $BINARY_PATH"
+        echo "   Please check if $INSTALL_DIR exists and is writable"
+        exit 1
+    fi
 
     # Check if ~/.local/bin is in PATH
     if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
@@ -104,13 +119,34 @@ install_claude_usage() {
     echo
 
     # Test the installation
-    if command -v claude-usage &> /dev/null; then
-        echo "✅ Perfect! claude-usage is ready to use right now."
-        echo "📊 $(claude-usage --version) is at your service!"
+    echo
+    echo "🔍 Verifying installation..."
+    
+    # Check if the binary exists at the expected location
+    if [ -f "$BINARY_PATH" ]; then
+        echo "✅ Binary found at $BINARY_PATH"
+        
+        # Test if it's executable and working
+        if "$BINARY_PATH" --version &> /dev/null; then
+            echo "✅ Binary is working correctly"
+            
+            # Check if it's in PATH
+            if command -v claude-usage &> /dev/null; then
+                echo "✅ Perfect! claude-usage is ready to use right now."
+                echo "📊 $(claude-usage --version) is at your service!"
+            else
+                echo "⚠️  Almost ready! You'll need to update your PATH first:"
+                echo "    export PATH=\"\$HOME/.local/bin:\$PATH\""
+                echo "    Then restart your terminal to start using claude-usage"
+            fi
+        else
+            echo "❌ Binary exists but is not working properly"
+            echo "   Try running: $BINARY_PATH --version"
+        fi
     else
-        echo "⚠️  Almost ready! You'll need to update your PATH first:"
-        echo "    export PATH=\"\$HOME/.local/bin:\$PATH\""
-        echo "    Then restart your terminal to start using claude-usage"
+        echo "❌ Binary not found at expected location: $BINARY_PATH"
+        echo "   Installation may have failed"
+        exit 1
     fi
 }
 
