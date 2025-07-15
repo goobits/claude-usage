@@ -25,8 +25,6 @@ show_help() {
     echo "Examples:"
     echo "  ./setup.sh install    # Quick start"
     echo "  ./setup.sh uninstall  # Clean removal"
-    echo
-    echo "💡 Pro tip: The Rust version is significantly faster than Python!"
 }
 
 install_claude_usage() {
