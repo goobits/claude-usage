@@ -23,7 +23,7 @@ impl LiveMonitor {
 
     pub async fn run_live_monitor(&mut self, json_output: bool, snapshot: bool) -> Result<()> {
         const TOKEN_LIMIT: u32 = 880000; // Max20 limit
-        const BUDGET_LIMIT: f64 = TOKEN_LIMIT as f64 * 0.000015; // ~$1.50 per 1000 tokens
+        const BUDGET_LIMIT: f64 = TOKEN_LIMIT as f64 * 0.0015; // ~$1.50 per 1000 tokens
         
         if json_output || snapshot {
             // Snapshot mode for JSON or when --snapshot is used
