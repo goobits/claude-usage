@@ -8,6 +8,8 @@ import glob
 import argparse
 import sys
 import requests
+import time
+import signal
 from pathlib import Path
 from datetime import datetime, timedelta
 from collections import defaultdict
@@ -798,18 +800,619 @@ class ClaudeUsageAnalyzer:
             )
             print(f"   {start_time}: ${block.get('costUSD', 0):.2f} ({tokens:,} tokens)")
 
+    # Live monitoring functionality
+    def create_progress_bar(self, percentage, width=20, status_color='🟢'):
+        """Create progress bar with cursor and color-coded status"""
+        pct = max(0, min(100, percentage))
+        
+        if pct >= 100:
+            filled = width
+            return f"{status_color} {'█' * filled}"
+        else:
+            filled = int(width * pct / 100)
+            cursor = 1 if pct < 100 else 0
+            empty = max(0, width - filled - cursor)
+            
+            filled_bar = '█' * filled
+            cursor_char = '▓' if cursor else ''
+            empty_bar = '░' * empty
+            
+            return f"{status_color} {filled_bar}{cursor_char}{empty_bar}"
+    
+    def format_time(self, minutes):
+        """Format time duration for display"""
+        if minutes < 60:
+            return f"{int(minutes)}m"
+        hours = int(minutes // 60)
+        mins = int(minutes % 60)
+        if mins == 0:
+            return f"{hours}h"
+        return f"{hours}h {mins}m"
+    
+    def clear_screen(self):
+        """Clear terminal screen"""
+        if sys.stdout.isatty():
+            os.system('clear' if os.name == 'posix' else 'cls')
+    
+    def hide_cursor(self):
+        """Hide terminal cursor"""
+        if sys.stdout.isatty():
+            sys.stdout.write('\033[?25l')
+            sys.stdout.flush()
+    
+    def show_cursor(self):
+        """Show terminal cursor"""
+        if sys.stdout.isatty():
+            sys.stdout.write('\033[?25h')
+            sys.stdout.flush()
+    
+    def load_session_blocks(self):
+        """Load ONLY recent session blocks for live monitoring (last 24 hours)"""
+        paths = self.discover_claude_paths()
+        blocks = []
+        cutoff_time = datetime.now() - timedelta(hours=24)
+        
+        for claude_path in paths:
+            try:
+                # Check multiple possible locations for session blocks
+                possible_dirs = [
+                    Path(claude_path) / 'usage_tracking',
+                    Path(claude_path),  # Sometimes stored in root
+                    Path(claude_path) / 'sessions'  # Alternative location
+                ]
+                
+                for usage_dir in possible_dirs:
+                    if not usage_dir.exists():
+                        continue
+                    
+                    # Find session blocks files (only recent ones)
+                    block_files = list(usage_dir.glob('session_blocks_*.json'))
+                    block_files.extend(list(usage_dir.glob('*session_blocks*.json')))  # Alternative naming
+                    
+                    # Filter by file modification time - only recent files
+                    recent_files = [f for f in block_files 
+                                  if datetime.fromtimestamp(f.stat().st_mtime) > cutoff_time]
+                    
+                    for block_file in recent_files:
+                        try:
+                            with open(block_file, 'r') as f:
+                                data = json.load(f)
+                                
+                                # Handle different data structures
+                                file_blocks = []
+                                if isinstance(data, list):
+                                    file_blocks = data
+                                elif isinstance(data, dict):
+                                    if 'blocks' in data:
+                                        file_blocks = data['blocks']
+                                    elif 'sessions' in data:
+                                        file_blocks = data['sessions']
+                                
+                                # Filter blocks to only recent ones (last 24 hours)
+                                for block in file_blocks:
+                                    try:
+                                        if 'startTime' in block:
+                                            start_time = datetime.fromisoformat(block['startTime'].replace('Z', '+00:00'))
+                                            if start_time.replace(tzinfo=None) > cutoff_time:
+                                                blocks.append(block)
+                                    except Exception:
+                                        continue
+                                        
+                        except Exception:
+                            continue
+                        
+            except Exception:
+                continue  # Skip failed paths silently
+        
+        return blocks
+    
+    def get_current_session_data(self):
+        """Get current session data from ALL recently active sessions across all VMs"""
+        paths = self.discover_claude_paths()
+        cutoff_time = datetime.now() - timedelta(minutes=10)  # Last 10 minutes for "current"
+        current_sessions = {}
+        
+        # Find ALL recently modified JSONL files across all paths
+        recent_files = []
+        
+        for claude_path in paths:
+            try:
+                projects_dir = Path(claude_path) / 'projects'
+                if not projects_dir.exists():
+                    continue
+                
+                for session_dir in projects_dir.iterdir():
+                    if not session_dir.is_dir():
+                        continue
+                    
+                    jsonl_files = list(session_dir.glob('*.jsonl'))
+                    for jsonl_file in jsonl_files:
+                        try:
+                            file_mtime = datetime.fromtimestamp(jsonl_file.stat().st_mtime)
+                            if file_mtime > cutoff_time:
+                                recent_files.append((jsonl_file, session_dir, file_mtime))
+                        except Exception:
+                            continue
+            except Exception:
+                continue
+        
+        # Process ALL recently active sessions
+        for jsonl_file, session_dir, file_mtime in recent_files:
+            session_data = {
+                'sessionId': session_dir.name,
+                'total_cost': 0,
+                'total_tokens': 0,
+                'start_time': None,
+                'last_activity': None,
+                'file_modified': file_mtime
+            }
+            
+            # For live monitoring, only show very recent activity (last 2 minutes)
+            # But track actual timing per entry for accurate burn rate calculation
+            now_utc = datetime.utcnow()
+            utc_cutoff = now_utc - timedelta(minutes=2)
+            
+            # Track tokens by time for accurate burn rate
+            tokens_by_minute = defaultdict(int)
+            cost_by_minute = defaultdict(float)
+            models_seen = set()  # Track actual models being used
+            token_cost_by_model = defaultdict(lambda: {'tokens': 0, 'cost': 0})  # Track per-model usage
+            
+            try:
+                with open(jsonl_file, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                            
+                        try:
+                            data = json.loads(line)
+                            
+                            # Check timestamp and extract entry time
+                            entry_time = None
+                            if 'timestamp' in data:
+                                timestamp = data['timestamp']
+                                if timestamp.endswith('Z'):
+                                    # UTC timestamp
+                                    entry_time = datetime.fromisoformat(timestamp[:-1])
+                                else:
+                                    # Assume UTC if no timezone
+                                    entry_time = datetime.fromisoformat(timestamp.replace('+00:00', ''))
+                                
+                                if entry_time < utc_cutoff:
+                                    continue  # Skip older entries
+                                
+                                # Track timing (keep in UTC for consistency)
+                                if session_data['start_time'] is None or entry_time < session_data['start_time']:
+                                    session_data['start_time'] = entry_time
+                                if session_data['last_activity'] is None or entry_time > session_data['last_activity']:
+                                    session_data['last_activity'] = entry_time
+                            
+                            # Extract usage data
+                            if 'message' in data and 'usage' in data['message'] and entry_time:
+                                usage = data['message']['usage']
+                                
+                                tokens = (usage.get('input_tokens', 0) + 
+                                        usage.get('output_tokens', 0) + 
+                                        usage.get('cache_creation_input_tokens', 0) + 
+                                        usage.get('cache_read_input_tokens', 0))
+                                
+                                session_data['total_tokens'] += tokens
+                                
+                                # Track tokens by minute for accurate burn rate calculation
+                                # Use actual conversation time, not file processing time
+                                minute_key = entry_time.strftime('%Y-%m-%d %H:%M')
+                                tokens_by_minute[minute_key] += tokens
+                                
+                                # Track actual model being used and calculate cost
+                                model_name = None
+                                if 'model' in data['message']:
+                                    model_name = data['message']['model']
+                                    models_seen.add(model_name)
+                                
+                                # Calculate cost
+                                entry_cost = 0
+                                if 'costUSD' in data and data['costUSD'] is not None:
+                                    entry_cost = data['costUSD']
+                                elif model_name:
+                                    entry_cost = self.calculate_cost_from_tokens({
+                                        'input_tokens': usage.get('input_tokens', 0),
+                                        'output_tokens': usage.get('output_tokens', 0),
+                                        'cache_creation_input_tokens': usage.get('cache_creation_input_tokens', 0),
+                                        'cache_read_input_tokens': usage.get('cache_read_input_tokens', 0)
+                                    }, model_name)
+                                
+                                # Track per-model usage for cost calculation accuracy
+                                if model_name:
+                                    token_cost_by_model[model_name]['tokens'] += tokens
+                                    token_cost_by_model[model_name]['cost'] += entry_cost
+                                
+                                session_data['total_cost'] += entry_cost
+                                cost_by_minute[minute_key] += entry_cost
+                                    
+                        except json.JSONDecodeError:
+                            continue
+                
+                # Only include if it has recent data
+                if (session_data['total_tokens'] > 0 or session_data['total_cost'] > 0):
+                    # Add burn rate calculation data
+                    session_data['tokens_by_minute'] = dict(tokens_by_minute)
+                    session_data['cost_by_minute'] = dict(cost_by_minute)
+                    session_data['models_used'] = list(models_seen)
+                    session_data['usage_by_model'] = dict(token_cost_by_model)
+                    
+                    # Calculate burn rates from actual conversation timeline
+                    if len(tokens_by_minute) >= 1:
+                        recent_minutes = sorted(tokens_by_minute.keys())
+                        recent_tokens = sum(tokens_by_minute[m] for m in recent_minutes)
+                        recent_cost = sum(cost_by_minute.get(m, 0) for m in recent_minutes)
+                        
+                        # Calculate based on actual conversation timespan, not just number of minutes with data
+                        if len(recent_minutes) >= 2:
+                            # Calculate actual time span of conversation
+                            start_minute = datetime.strptime(recent_minutes[0], '%Y-%m-%d %H:%M')
+                            end_minute = datetime.strptime(recent_minutes[-1], '%Y-%m-%d %H:%M')
+                            actual_duration_minutes = (end_minute - start_minute).total_seconds() / 60 + 1  # +1 for inclusive
+                            
+                            # Use actual conversation duration for burn rate
+                            burn_rate_tokens = recent_tokens / actual_duration_minutes
+                            burn_rate_cost = (recent_cost / actual_duration_minutes) * 60  # per hour
+                        else:
+                            # Single minute of data - use that minute's rate
+                            burn_rate_tokens = recent_tokens
+                            burn_rate_cost = recent_cost * 60  # per hour
+                        
+                        # Use actual calculated burn rates - no artificial caps
+                        session_data['realBurnRateTokens'] = burn_rate_tokens
+                        session_data['realBurnRateCost'] = burn_rate_cost
+                    else:
+                        # No data available
+                        session_data['realBurnRateTokens'] = 0
+                        session_data['realBurnRateCost'] = 0
+                    
+                    current_sessions[session_dir.name] = session_data
+                    
+            except Exception:
+                pass
+                
+        return current_sessions
+    
+    def find_active_session_block(self, cached_blocks=None, cache_time=None):
+        """Find currently active session block with 30s caching, fallback to current session data"""
+        current_time = time.time()
+        
+        # Use cache if available and recent (30 seconds)
+        if cached_blocks is not None and cache_time is not None:
+            if current_time - cache_time < 30:
+                # Find active block from cache
+                now = datetime.now()
+                for block in cached_blocks:
+                    try:
+                        end_time = datetime.fromisoformat(block['endTime'].replace('Z', '+00:00'))
+                        if end_time.replace(tzinfo=None) > now:
+                            return block, cached_blocks, cache_time
+                    except Exception:
+                        continue
+                return None, cached_blocks, cache_time
+        
+        # Try to load session blocks first
+        blocks = self.load_session_blocks()
+        now = datetime.now()
+        
+        # Find active block from session blocks
+        for block in blocks:
+            try:
+                end_time = datetime.fromisoformat(block['endTime'].replace('Z', '+00:00'))
+                if end_time.replace(tzinfo=None) > now:
+                    return block, blocks, current_time
+            except Exception:
+                continue
+        
+        # Fallback: if no session blocks found, create aggregated synthetic block from ALL current sessions
+        current_sessions = self.get_current_session_data()
+        if current_sessions:
+            # Aggregate data from ALL active sessions
+            total_tokens = 0
+            total_cost = 0
+            earliest_start = None
+            latest_activity = None
+            active_session_count = len(current_sessions)
+            
+            # Aggregate per-minute data for accurate burn rate calculation
+            all_tokens_by_minute = defaultdict(int)
+            all_cost_by_minute = defaultdict(float)
+            total_burn_rate_tokens = 0
+            total_burn_rate_cost = 0
+            sessions_with_valid_burn_rates = 0
+            
+            for session_id, session_data in current_sessions.items():
+                total_tokens += session_data['total_tokens']
+                total_cost += session_data['total_cost']
+                
+                # Use the real burn rates calculated from actual usage
+                session_burn_tokens = session_data.get('realBurnRateTokens', 0)
+                session_burn_cost = session_data.get('realBurnRateCost', 0)
+                total_burn_rate_tokens += session_burn_tokens
+                total_burn_rate_cost += session_burn_cost
+                if session_burn_tokens > 0:
+                    sessions_with_valid_burn_rates += 1
+                
+                if session_data['start_time']:
+                    if earliest_start is None or session_data['start_time'] < earliest_start:
+                        earliest_start = session_data['start_time']
+                
+                if session_data['last_activity']:
+                    if latest_activity is None or session_data['last_activity'] > latest_activity:
+                        latest_activity = session_data['last_activity']
+                
+                # Aggregate per-minute burn rate data (for backup calculation)
+                for minute, tokens in session_data.get('tokens_by_minute', {}).items():
+                    all_tokens_by_minute[minute] += tokens
+                for minute, cost in session_data.get('cost_by_minute', {}).items():
+                    all_cost_by_minute[minute] += cost
+            
+            if latest_activity and total_tokens > 0:
+                # Use the aggregated burn rates from actual conversation timelines
+                burn_rate_tokens = total_burn_rate_tokens
+                burn_rate_cost = total_burn_rate_cost
+                
+                # No need for artificial adjustments - we're using actual conversation timelines
+                
+                # Create aggregated synthetic session block representing all active sessions
+                start_time = earliest_start or latest_activity
+                # Set end time to be 10 minutes after latest activity
+                end_time = latest_activity + timedelta(minutes=10)
+                
+                synthetic_block = {
+                    'startTime': start_time.isoformat() + 'Z',
+                    'endTime': end_time.isoformat() + 'Z',
+                    'tokenCounts': {
+                        'inputTokens': total_tokens // 2,  # Rough split
+                        'outputTokens': total_tokens // 2,
+                        'cacheCreationInputTokens': 0,
+                        'cacheReadInputTokens': 0
+                    },
+                    'costUSD': total_cost,
+                    'activeSessionCount': active_session_count,
+                    # Add real burn rate data
+                    'realBurnRateTokens': burn_rate_tokens,
+                    'realBurnRateCost': burn_rate_cost,
+                    'tokensPerMinute': dict(all_tokens_by_minute)  # For debugging
+                }
+                return synthetic_block, [synthetic_block], current_time
+        
+        return None, blocks, current_time
+    
+    def run_live_monitor(self, snapshot=False, json_output=False):
+        """Run live monitoring with performance optimizations"""
+        TOKEN_LIMIT = 880000  # Max20 limit
+        BUDGET_LIMIT = TOKEN_LIMIT * 0.0015  # ~$1.50 per 1000 tokens
+        
+        # Performance cache
+        cached_blocks = None
+        cache_time = None
+        
+        def display_live_data():
+            """Display live monitoring data once"""
+            # Find active session with caching
+            nonlocal cached_blocks, cache_time
+            active_block, cached_blocks, cache_time = self.find_active_session_block(cached_blocks, cache_time)
+            
+            now = datetime.now()
+            current_time = now.strftime('%H:%M')
+            
+            if json_output:
+                # JSON output for snapshot mode
+                if active_block:
+                    token_counts = active_block.get('tokenCounts', {})
+                    total_tokens = sum(token_counts.values())
+                    cost_used = active_block.get('costUSD', 0)
+                    
+                    try:
+                        start_time = datetime.fromisoformat(active_block['startTime'].replace('Z', ''))
+                        end_time = datetime.fromisoformat(active_block['endTime'].replace('Z', ''))
+                        now_utc = datetime.utcnow()
+                        
+                        elapsed_minutes = (now_utc - start_time).total_seconds() / 60
+                        remaining_minutes = max(0, (end_time - now_utc).total_seconds() / 60)
+                        
+                        # Use real burn rates if available
+                        if 'realBurnRateTokens' in active_block and 'realBurnRateCost' in active_block:
+                            burn_rate = active_block['realBurnRateTokens']
+                            cost_burn_rate = active_block['realBurnRateCost']
+                        else:
+                            burn_rate = total_tokens / elapsed_minutes if elapsed_minutes > 0 else 0
+                            cost_burn_rate = (cost_used / elapsed_minutes) * 60 if elapsed_minutes > 0 else 0
+                        
+                        snapshot_data = {
+                            'status': 'active',
+                            'tokens': {
+                                'current': total_tokens,
+                                'limit': TOKEN_LIMIT,
+                                'percentage': (total_tokens / TOKEN_LIMIT) * 100
+                            },
+                            'cost': {
+                                'current': cost_used,
+                                'limit': BUDGET_LIMIT
+                            },
+                            'timing': {
+                                'elapsed_minutes': elapsed_minutes,
+                                'remaining_minutes': remaining_minutes,
+                                'current_time': current_time
+                            },
+                            'burn_rates': {
+                                'tokens_per_minute': burn_rate,
+                                'cost_per_hour': cost_burn_rate
+                            },
+                            'session_count': active_block.get('activeSessionCount', 1)
+                        }
+                    except Exception:
+                        snapshot_data = {'status': 'error', 'message': 'Could not parse session data'}
+                else:
+                    snapshot_data = {'status': 'inactive', 'message': 'No active session'}
+                
+                print(json.dumps(snapshot_data, indent=2))
+                return
+            
+            # Terminal output
+            if not snapshot:
+                self.clear_screen()
+            
+            # Print header
+            print("\033[1m[ CLAUDE USAGE MONITOR ]\033[0m")
+            print()
+            
+            if not active_block:
+                # No active session - show waiting state
+                print(f"⚡ Tokens:  {self.create_progress_bar(0, 20, '🟢')} 0 / {TOKEN_LIMIT:,}")
+                print(f"💲 Budget:  {self.create_progress_bar(0, 20, '🟢')} $0.00 / ${BUDGET_LIMIT:.2f}")
+                print(f"♻️  Reset:   {self.create_progress_bar(0, 20, '🕐')} 0m")
+                print()
+                print("🔥 0.0 tok/min | 💰 $0.00/hour")
+                print()
+                print(f"🕐 {current_time} | 🏁 No session | ♻️  Next reset")
+                print()
+                print("📝 No active session")
+                if snapshot:
+                    print(f"\n[Snapshot mode - scanned {len(self.discover_claude_paths())} Claude instances]")
+            else:
+                # Active session - calculate metrics
+                try:
+                    start_time = datetime.fromisoformat(active_block['startTime'].replace('Z', ''))
+                    end_time = datetime.fromisoformat(active_block['endTime'].replace('Z', ''))
+                    
+                    # Get token counts
+                    token_counts = active_block.get('tokenCounts', {})
+                    total_tokens = (
+                        token_counts.get('inputTokens', 0) +
+                        token_counts.get('outputTokens', 0) +
+                        token_counts.get('cacheCreationInputTokens', 0) +
+                        token_counts.get('cacheReadInputTokens', 0)
+                    )
+                    
+                    cost_used = active_block.get('costUSD', 0)
+                    
+                    # Calculate session progress
+                    now_utc = datetime.utcnow()
+                    total_session_minutes = (end_time - start_time).total_seconds() / 60
+                    elapsed_minutes = max(0, (now_utc - start_time).total_seconds() / 60)
+                    remaining_minutes = max(0, (end_time - now_utc).total_seconds() / 60)
+                    
+                    # Progress percentages
+                    token_percentage = (total_tokens / TOKEN_LIMIT) * 100
+                    token_status = '🟢' if token_percentage < 70 else '🟡' if token_percentage < 90 else '🔴'
+                    
+                    budget_percentage = (cost_used / BUDGET_LIMIT) * 100
+                    budget_status = '🟢' if budget_percentage < 70 else '🟡' if budget_percentage < 90 else '🔴'
+                    
+                    reset_percentage = (elapsed_minutes / total_session_minutes) * 100 if total_session_minutes > 0 else 0
+                    
+                    # Burn rates - use real rates calculated from actual conversation timelines
+                    burn_rate = active_block.get('realBurnRateTokens', 0)
+                    cost_burn_rate = active_block.get('realBurnRateCost', 0)
+                    
+                    # Time displays
+                    reset_time = end_time.strftime('%H:%M')
+                    
+                    # Predict when tokens will run out
+                    if burn_rate > 0 and total_tokens < TOKEN_LIMIT:
+                        tokens_left = TOKEN_LIMIT - total_tokens
+                        minutes_to_depletion = tokens_left / burn_rate
+                        predicted_end = now + timedelta(minutes=minutes_to_depletion)
+                        predicted_end_str = predicted_end.strftime('%H:%M')
+                    elif total_tokens >= TOKEN_LIMIT:
+                        predicted_end_str = "LIMIT HIT"
+                    else:
+                        predicted_end_str = reset_time
+                    
+                    # Status message
+                    if total_tokens > TOKEN_LIMIT:
+                        status_message = f"🚨 Session tokens exceeded limit! ({total_tokens:,} > {TOKEN_LIMIT:,})"
+                    elif budget_percentage > 90:
+                        status_message = "💸 High session cost!"
+                    elif token_percentage > 90:
+                        status_message = "🔥 High session usage!"
+                    else:
+                        status_message = "⛵ Smooth sailing..."
+                    
+                    # Add session count info if available
+                    session_count = active_block.get('activeSessionCount', 1)
+                    if session_count > 1:
+                        status_message += f" ({session_count} active VMs)"
+                    
+                    # Display the monitor
+                    print(f"⚡ Tokens:  {self.create_progress_bar(token_percentage, 20, token_status)} {total_tokens:,} / {TOKEN_LIMIT:,}")
+                    print(f"💲 Budget:  {self.create_progress_bar(budget_percentage, 20, budget_status)} ${cost_used:.2f} / ${BUDGET_LIMIT:.2f}")
+                    print(f"♻️  Reset:   {self.create_progress_bar(reset_percentage, 20, '🕐')} {self.format_time(remaining_minutes)}")
+                    print()
+                    # Display burn rates calculated from actual conversation timelines
+                    burn_rate_str = f"{burn_rate:.1f} tok/min" if burn_rate > 0 else "0.0 tok/min"
+                    cost_rate_str = f"${cost_burn_rate:.2f}/hour" if cost_burn_rate > 0 else "$0.00/hour"
+                    print(f"🔥 {burn_rate_str} | 💰 {cost_rate_str}")
+                    print()
+                    print(f"🕐 {current_time} | 🏁 {predicted_end_str} | ♻️  {reset_time}")
+                    print()
+                    print(status_message)
+                    
+                    if snapshot:
+                        print(f"\n[Snapshot mode - aggregated from {session_count} active session(s) across {len(self.discover_claude_paths())} Claude instances]")
+                    
+                except Exception as e:
+                    print(f"❌ Error processing active session: {e}")
+                    print("📝 Session data corrupted")
+                    if snapshot:
+                        print(f"\n[Snapshot mode - error occurred]")
+            
+            return
+        
+        # Snapshot mode - show data once and exit
+        if snapshot:
+            display_live_data()
+            return
+        
+        # Live monitoring mode - continuous updates
+        if not json_output:
+            self.hide_cursor()
+        
+        # Graceful exit handling
+        def signal_handler(signum, frame):
+            if not json_output:
+                self.show_cursor()
+            print('\n\n\033[96mMonitoring stopped.\033[0m')
+            sys.exit(0)
+        
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+        
+        try:
+            while True:
+                display_live_data()
+                
+                # Wait 3 seconds before next update
+                time.sleep(3)
+                
+        except KeyboardInterrupt:
+            self.show_cursor()
+            print('\n\n\033[96mMonitoring stopped.\033[0m')
+        except Exception as e:
+            self.show_cursor()
+            print(f'\n\n❌ Monitor error: {e}')
+        finally:
+            self.show_cursor()
+
 def parse_args():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(description='Claude Usage Max - Fast Python implementation')
     
     # Commands
     parser.add_argument('command', nargs='?', default='daily',
-                      choices=['daily', 'monthly', 'session', 'blocks'],
+                      choices=['daily', 'monthly', 'session', 'blocks', 'live'],
                       help='Command to run (default: daily)')
     
     # Options
     parser.add_argument('--json', action='store_true', help='Output in JSON format')
     parser.add_argument('--last', type=int, help='Show last N entries')
+    parser.add_argument('--snapshot', action='store_true', help='Show live data snapshot (single view, no monitoring loop)')
     parser.add_argument('--week', action='store_true', help='Show this week\'s data')
     parser.add_argument('--month', action='store_true', help='Show this month\'s data')
     parser.add_argument('--year', action='store_true', help='Show this year\'s data')
@@ -856,10 +1459,18 @@ def main():
         pass
     
     try:
+        # Handle live monitoring FIRST - don't scan historical data
+        if args.command == 'live':
+            if args.json and not args.snapshot:
+                print("Error: Live monitoring does not support --json output", file=sys.stderr)
+                sys.exit(1)
+            analyzer.run_live_monitor(snapshot=args.snapshot, json_output=args.json)
+            return
+        
         # Add command to options for lazy processing
         options['command'] = args.command
         
-        # Load data
+        # Load data (only for non-live commands)
         data = analyzer.aggregate_data_parallel(args.command, options)
         
         if not data:
