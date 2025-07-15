@@ -1,11 +1,6 @@
 # 📊 Claude Usage
 
-A fast Python implementation for comprehensive Claude usage analysis across multiple VMs and instances. Track token consumption, costs, and session activity with real-time monitoring capabilities. Built for developers and teams using Claude Code to monitor usage patterns and optimize costs.
-
-## 🔗 Related Projects
-
-- **[Claude Code](https://claude.ai/code)** - Official Claude coding assistant
-- **[Claude Usage](https://github.com/goobits/claudeusage)** - Usage monitoring tool (this project)
+A fast Python implementation for comprehensive Claude usage analysis across multiple VMs and instances. Track token consumption, costs, and session activity with real-time monitoring capabilities. Complete rewrite of the original Node.js-based [ccusage](https://github.com/ryoppippi/ccusage) with enhanced performance and features.
 
 ## 📋 Table of Contents
 
@@ -149,25 +144,12 @@ The live monitor provides real-time tracking with:
 
 ## 🛠️ Tech Stack
 
-### Core Technologies
-- **🐍 Python**: Modern async/await patterns with pathlib and dataclasses
-- **📊 Data Processing**: JSON streaming, datetime handling, collections optimization
-- **🌐 Network**: HTTP requests for live pricing data with fallback caching
+- **Python 3.8+** with standard library (pathlib, json, datetime)
+- **Requests** for live pricing data from LiteLLM API
+- **Single module** design for easy deployment
+- **Cross-platform** support (Windows, macOS, Linux)
 
-### Performance Optimization
-- **📁 File System**: Fast directory scanning with modification time filtering
-- **🔄 Deduplication**: Time-windowed hash sets for memory efficiency
-- **⚡ Parallel Processing**: Concurrent file processing with early exit
-- **💾 Caching**: Smart caching for frequently accessed data
+## 🔗 Related Projects
 
-### User Interface
-- **🎨 Terminal**: Rich formatting with progress bars and emojis
-- **📱 CLI**: Comprehensive argument parsing with intuitive defaults
-- **📊 Output**: Multiple format support (text tables, JSON)
-- **⚡ Real-time**: Live monitoring with signal handling for graceful exit
-
-### Development
-- **📦 Packaging**: Modern pyproject.toml with setuptools
-- **🔧 Distribution**: Entry points for global command installation
-- **🎯 Dependencies**: Minimal requirements (only requests for pricing)
-- **🏗️ Architecture**: Single-module design for easy deployment and maintenance
+- **[Claude Code](https://claude.ai/code)** - Official Claude coding assistant
+- **[ccusage](https://github.com/ryoppippi/ccusage)** - Original Node.js implementation (predecessor)
