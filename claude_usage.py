@@ -324,7 +324,7 @@ class ClaudeUsageAnalyzer:
         
         # Lazy processing: determine what data we need to track
         command = options.get('command', 'daily')
-        need_timestamps = command in ['daily', 'session']  # Monthly/blocks don't need timestamps
+        need_timestamps = command in ['daily', 'session', 'monthly']  # Monthly needs timestamps for month grouping
         
         # Early exit optimization for --last N queries
         last_limit = options.get('last')
@@ -501,7 +501,7 @@ class ClaudeUsageAnalyzer:
                 'cacheReadTokens': session_data['cache_read_tokens'],
                 'totalCost': session_data['total_cost'],
                 'lastActivity': session_data['last_activity'] or '1970-01-01',
-                'modelsUsed': list(session_data['models_used'])
+                'modelsUsed': sorted(list(session_data['models_used']))
             })
         
         return result
@@ -846,11 +846,11 @@ class ClaudeUsageAnalyzer:
             sys.stdout.write('\033[?25h')
             sys.stdout.flush()
     
-    def load_session_blocks(self):
-        """Load ONLY recent session blocks for live monitoring (last 24 hours)"""
+    def load_session_blocks(self, filter_recent=True):
+        """Load session blocks (optionally filter to last 24 hours for live monitoring)"""
         paths = self.discover_claude_paths()
         blocks = []
-        cutoff_time = datetime.now() - timedelta(hours=24)
+        cutoff_time = datetime.now() - timedelta(hours=24) if filter_recent else None
         
         for claude_path in paths:
             try:
@@ -869,11 +869,14 @@ class ClaudeUsageAnalyzer:
                     block_files = list(usage_dir.glob('session_blocks_*.json'))
                     block_files.extend(list(usage_dir.glob('*session_blocks*.json')))  # Alternative naming
                     
-                    # Filter by file modification time - only recent files
-                    recent_files = [f for f in block_files 
-                                  if datetime.fromtimestamp(f.stat().st_mtime) > cutoff_time]
+                    # Filter by file modification time if requested
+                    if filter_recent and cutoff_time:
+                        files_to_process = [f for f in block_files 
+                                          if datetime.fromtimestamp(f.stat().st_mtime) > cutoff_time]
+                    else:
+                        files_to_process = block_files
                     
-                    for block_file in recent_files:
+                    for block_file in files_to_process:
                         try:
                             with open(block_file, 'r') as f:
                                 data = json.load(f)
@@ -888,13 +891,15 @@ class ClaudeUsageAnalyzer:
                                     elif 'sessions' in data:
                                         file_blocks = data['sessions']
                                 
-                                # Filter blocks to only recent ones (last 24 hours)
+                                # Filter blocks to only recent ones if requested
                                 for block in file_blocks:
                                     try:
-                                        if 'startTime' in block:
+                                        if filter_recent and cutoff_time and 'startTime' in block:
                                             start_time = datetime.fromisoformat(block['startTime'].replace('Z', '+00:00'))
                                             if start_time.replace(tzinfo=None) > cutoff_time:
                                                 blocks.append(block)
+                                        else:
+                                            blocks.append(block)
                                     except Exception:
                                         continue
                                         
@@ -1470,7 +1475,14 @@ def main():
         # Add command to options for lazy processing
         options['command'] = args.command
         
-        # Load data (only for non-live commands)
+        # Handle blocks command separately
+        if args.command == 'blocks':
+            # Load session blocks directly (without time filtering)
+            blocks = analyzer.load_session_blocks(filter_recent=False)
+            analyzer.display_blocks(blocks, args.last, args.json)
+            return
+        
+        # Load data (for non-blocks, non-live commands)
         data = analyzer.aggregate_data_parallel(args.command, options)
         
         if not data:
@@ -1487,8 +1499,6 @@ def main():
             analyzer.display_monthly(data, args.last, args.json)
         elif args.command == 'session':
             analyzer.display_session(data, args.last, args.json)
-        elif args.command == 'blocks':
-            analyzer.display_blocks(data, args.last, args.json)
             
     except Exception as e:
         if args.json:

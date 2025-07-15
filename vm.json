@@ -1,0 +1,24 @@
+{
+	"project": {
+		"name": "claudeusage",
+		"hostname": "dev.claudeusage.local",
+		"workspace_path": "/workspace"
+	},
+	"vm": {
+		"memory": 2048,
+		"cpus": 4,
+		"user": "developer",
+		"timezone": "America/Los_Angeles"
+	},
+	"aliases": {
+		"usage": "python3 claude_usage.py"
+	},
+	"terminal": {
+		"emoji": "📊",
+		"username": "claudeusage-dev",
+		"show_git_branch": true,
+		"theme": "dracula"
+	},
+	"claude_sync": true,
+	"gemini_sync": false
+}

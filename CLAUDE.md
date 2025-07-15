@@ -31,10 +31,15 @@ The live monitor (`claude_usage.py live`) provides real-time usage tracking with
 - Progress bars for token limits and budget tracking
 - Multi-VM session aggregation
 
-## Common Commands
+## Installation & Common Commands
+
+**Always use pipx for installation** as this is a CLI tool:
 
 ```bash
-# Install in development mode
+# Production install
+pipx install .
+
+# Development install
 pip install -e .
 
 # Run the tool
