@@ -1,6 +1,5 @@
 use claude_usage::display::DisplayManager;
 use claude_usage::models::SessionOutput;
-use std::collections::HashSet;
 
 #[test]
 fn test_display_manager() {

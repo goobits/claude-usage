@@ -112,7 +112,7 @@ claude-usage daily --json | jq .
 claude-usage session --json | jq -r '.session[].sessionId'
 
 # Integration examples
-claude-usage daily --json | python3 -c "import json,sys; print(sum(d['totalCost'] for d in json.load(sys.stdin)['daily']))"
+claude-usage daily --json | jq '[.daily[].totalCost] | add'
 ```
 
 ## 🗂️ Data Sources

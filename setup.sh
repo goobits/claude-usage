@@ -35,8 +35,8 @@ install_claude_usage() {
     echo
 
     # Check if we're in the right directory
-    if [ ! -d "rust" ]; then
-        echo "❌ Oops! We can't find the rust/ directory here."
+    if [ ! -f "Cargo.toml" ]; then
+        echo "❌ Oops! We can't find Cargo.toml here."
         echo "💡 Please run this script from the project root directory"
         exit 1
     fi
@@ -67,7 +67,6 @@ install_claude_usage() {
     echo
     echo "🔨 Building the high-performance Rust version..."
     echo "   This might take a moment, but the speed gains are worth it!"
-    cd rust
     cargo build --release
 
     if [ $? -eq 0 ]; then
@@ -174,12 +173,12 @@ uninstall_claude_usage() {
     fi
 
     # Clean up build artifacts (optional)
-    if [ -d "rust/target" ]; then
+    if [ -d "target" ]; then
         echo
         read -p "🧹 Clean up build artifacts? [y/N]: " -n 1 -r
         echo
         if [[ $REPLY =~ ^[Yy]$ ]]; then
-            rm -rf rust/target
+            rm -rf target
             echo "✅ Build artifacts cleaned"
             REMOVED_SOMETHING=true
         fi

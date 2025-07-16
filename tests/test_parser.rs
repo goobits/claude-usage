@@ -1,6 +1,5 @@
 use claude_usage::parser::FileParser;
 use claude_usage::models::CostMode;
-use std::path::PathBuf;
 
 mod common;
 
@@ -28,12 +27,12 @@ fn test_create_unique_hash() {
         message: claude_usage::models::MessageData {
             id: "msg123".to_string(),
             model: "claude-sonnet-4-20250514".to_string(),
-            usage: claude_usage::models::UsageData {
+            usage: Some(claude_usage::models::UsageData {
                 input_tokens: 100,
                 output_tokens: 50,
                 cache_creation_input_tokens: 0,
                 cache_read_input_tokens: 0,
-            },
+            }),
         },
         cost_usd: Some(0.001),
         request_id: "req456".to_string(),
