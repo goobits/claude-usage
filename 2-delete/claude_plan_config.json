@@ -1,0 +1,12 @@
+{
+  "detected_plan": "max20+",
+  "confidence": "high",
+  "max_tokens_observed": 55658477,
+  "detection_timestamp": "2025-07-15T16:37:22.115482",
+  "token_limits": {
+    "pro": 200000,
+    "max5": 400000,
+    "max20": 880000
+  },
+  "window_duration_hours": 5
+}
