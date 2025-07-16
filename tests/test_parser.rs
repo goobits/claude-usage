@@ -7,12 +7,12 @@ mod common;
 fn test_extract_session_info() {
     let parser = FileParser::new(CostMode::Auto);
     
-    // Test with dash prefix
+    // Test with dash prefix - now returns full path without leading dash
     let (session_id, project_name) = parser.extract_session_info("-vm1-project-test");
     assert_eq!(session_id, "-vm1-project-test");
-    assert_eq!(project_name, "test");
+    assert_eq!(project_name, "vm1-project-test");
     
-    // Test without dash prefix
+    // Test without dash prefix - returns full path
     let (session_id, project_name) = parser.extract_session_info("simple-project");
     assert_eq!(session_id, "simple-project");
     assert_eq!(project_name, "simple-project");

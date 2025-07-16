@@ -248,11 +248,10 @@ impl FileParser {
         let session_id = session_dir_name.to_string();
         
         let project_name = if session_dir_name.starts_with('-') {
-            // Remove leading - and split
-            let parts: Vec<&str> = session_dir_name[1..].split('-').collect();
-            parts.last().unwrap_or(&"unknown").to_string()
+            // Remove only the leading dash, keep the full path
+            session_dir_name[1..].to_string()
         } else {
-            session_dir_name.split('/').last().unwrap_or("unknown").to_string()
+            session_dir_name.to_string()
         };
         
         (session_id, project_name)

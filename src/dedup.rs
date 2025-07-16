@@ -141,11 +141,52 @@ impl DeduplicationEngine {
                 // Calculate cost based on mode
                 let entry_cost = self.calculate_entry_cost(&entry).await;
                 
-                // Extract session info
+                // Extract session info with more context
                 let session_dir_name = session_dir.file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or("unknown");
-                let (session_id, project_name) = parser.extract_session_info(session_dir_name);
+                
+                // Extract meaningful project path, stripping only the home/.claude/ base
+                let full_path = session_dir.to_string_lossy();
+                let project_name = if let Some(claude_pos) = full_path.find("/.claude/") {
+                    let after_claude = &full_path[claude_pos + 9..]; // "/.claude/" is 9 chars
+                    
+                    if after_claude.starts_with("projects/") {
+                        // For main projects, check if it's a simple project name or has path structure
+                        let project_part = &after_claude[9..]; // Skip "projects/"
+                        if project_part.starts_with('-') {
+                            // Handle cases like "projects/-home-miko-projects-system-weather" -> "projects/system-weather"
+                            if let Some(last_dash) = project_part.rfind('-') {
+                                let suffix = &project_part[last_dash + 1..];
+                                if !suffix.is_empty() && suffix != "projects" {
+                                    format!("projects/{}", suffix)
+                                } else {
+                                    "projects".to_string()
+                                }
+                            } else {
+                                "projects".to_string()
+                            }
+                        } else {
+                            format!("projects/{}", project_part)
+                        }
+                    } else if after_claude.starts_with("vms/") {
+                        // For VMs, extract vm_name from "vms/vm_name/projects/-workspace" -> "vms/vm_name"
+                        let vm_part = &after_claude[4..]; // Skip "vms/"
+                        if let Some(slash_pos) = vm_part.find('/') {
+                            let vm_name = &vm_part[..slash_pos];
+                            format!("vms/{}", vm_name)
+                        } else {
+                            after_claude.to_string()
+                        }
+                    } else {
+                        session_dir_name.to_string()
+                    }
+                } else {
+                    // Fallback: just use the directory name
+                    session_dir_name.to_string()
+                };
+                
+                let (session_id, _) = parser.extract_session_info(session_dir_name);
                 
                 // Get or create session data (use full path like Python)
                 let session_data = sessions_by_dir.entry(session_dir.clone())

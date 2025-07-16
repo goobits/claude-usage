@@ -2,6 +2,7 @@ use crate::models::*;
 use crate::utils::format_with_commas;
 use std::collections::HashMap;
 use serde_json;
+use colored::*;
 
 pub struct DisplayManager;
 
@@ -19,34 +20,38 @@ impl DisplayManager {
             return;
         }
         
-        println!("\n{}", "=".repeat(80));
-        println!("Claude Code Usage Report - Daily with Project Breakdown (All Instances)");
-        println!("{}", "=".repeat(80));
+        println!("\n{}", "=".repeat(80).bright_cyan());
+        println!("{}", "Claude Code Usage Report - Daily with Project Breakdown (All Instances)".bright_white().bold());
+        println!("{}", "=".repeat(80).bright_cyan());
         
         let total_cost: f64 = daily_data.iter().map(|d| d.total_cost).sum();
         let total_sessions: u32 = daily_data.iter().map(|d| d.total_sessions).sum();
         
-        println!("\n📊 {} days • {} sessions • ${:.2} total\n", 
-                 daily_data.len(), total_sessions, total_cost);
+        println!("\n{} {} days • {} sessions • {} total\n", 
+                 "📊".bright_yellow(),
+                 daily_data.len().to_string().bright_white().bold(),
+                 total_sessions.to_string().bright_white().bold(),
+                 format!("${:.2}", total_cost).bright_green().bold());
         
         for day in &daily_data {
-            println!("📅 {} — ${:.2} ({} sessions)", 
-                     day.date, day.total_cost, day.total_sessions);
+            println!("{} {} — {} ({} sessions)", 
+                     "📅".bright_blue(),
+                     day.date.bright_white().bold(),
+                     format!("${:.2}", day.total_cost).bright_green().bold(),
+                     format!("{}", day.total_sessions).bright_white());
             
-            // Show top 8 projects
-            for project in day.projects.iter().take(8) {
+            // Show all projects
+            for project in &day.projects {
                 let percentage = if day.total_cost > 0.0 {
                     project.total_cost / day.total_cost * 100.0
                 } else {
                     0.0
                 };
-                println!("   {}: ${:.2} ({:.0}%, {} sessions)", 
-                         project.project, project.total_cost, percentage, project.sessions);
-            }
-            
-            if day.projects.len() > 8 {
-                let remaining_cost: f64 = day.projects.iter().skip(8).map(|p| p.total_cost).sum();
-                println!("   ... {} more: ${:.2}", day.projects.len() - 8, remaining_cost);
+                println!("   {}: {} ({}%, {} sessions)", 
+                         project.project.bright_cyan(),
+                         format!("${:.2}", project.total_cost).bright_green(),
+                         format!("{:.0}", percentage).bright_yellow(),
+                         format!("{}", project.sessions).bright_white());
             }
             
             println!(); // Empty line
@@ -63,25 +68,27 @@ impl DisplayManager {
             return;
         }
         
-        println!("\n{}", "=".repeat(80));
-        println!("Claude Code Usage Report - Monthly (All Instances)");
-        println!("{}", "=".repeat(80));
+        println!("\n{}", "=".repeat(80).bright_cyan());
+        println!("{}", "Claude Code Usage Report - Monthly (All Instances)".bright_white().bold());
+        println!("{}", "=".repeat(80).bright_cyan());
         
         let total_cost: f64 = monthly_data.iter().map(|m| m.total_cost).sum();
         let total_sessions: u32 = monthly_data.iter().map(|m| m.total_sessions).sum();
         
-        println!("\n📊 Total Usage Summary:");
-        println!("   Records: {}", monthly_data.len());
-        println!("   Total Cost: ${:.2}", total_cost);
-        println!("   Total Sessions: {}", total_sessions);
+        println!("\n{} Total Usage Summary:", "📊".bright_yellow());
+        println!("   Records: {}", monthly_data.len().to_string().bright_white().bold());
+        println!("   Total Cost: {}", format!("${:.2}", total_cost).bright_green().bold());
+        println!("   Total Sessions: {}", total_sessions.to_string().bright_white().bold());
         println!();
         
         let display_limit = limit.unwrap_or(10);
         let recent_data: Vec<_> = monthly_data.iter().rev().take(display_limit).collect();
-        println!("📅 Recent monthly usage (last {}):", recent_data.len());
+        println!("{} Recent monthly usage (last {}):", "📅".bright_blue(), recent_data.len().to_string().bright_white().bold());
         for month in recent_data.iter().rev() {
-            println!("   {}: ${:.2} ({} sessions)", 
-                     month.month, month.total_cost, month.total_sessions);
+            println!("   {}: {} ({} sessions)", 
+                     month.month.bright_white().bold(),
+                     format!("${:.2}", month.total_cost).bright_green(),
+                     format!("{}", month.total_sessions).bright_white());
         }
     }
 
@@ -95,30 +102,33 @@ impl DisplayManager {
             return;
         }
         
-        println!("\n{}", "=".repeat(80));
-        println!("Claude Code Usage Report - Session (All Instances)");
-        println!("{}", "=".repeat(80));
+        println!("\n{}", "=".repeat(80).bright_cyan());
+        println!("{}", "Claude Code Usage Report - Session (All Instances)".bright_white().bold());
+        println!("{}", "=".repeat(80).bright_cyan());
         
         let total_cost: f64 = sorted_data.iter().map(|s| s.total_cost).sum();
         let total_tokens: u32 = sorted_data.iter().map(|s| {
             s.input_tokens + s.output_tokens + s.cache_creation_tokens + s.cache_read_tokens
         }).sum();
         
-        println!("\n📊 Total Usage Summary:");
-        println!("   Records: {}", sorted_data.len());
-        println!("   Total Cost: ${:.2}", total_cost);
-        println!("   Total Tokens: {}", format_with_commas(total_tokens));
+        println!("\n{} Total Usage Summary:", "📊".bright_yellow());
+        println!("   Records: {}", sorted_data.len().to_string().bright_white().bold());
+        println!("   Total Cost: {}", format!("${:.2}", total_cost).bright_green().bold());
+        println!("   Total Tokens: {}", format_with_commas(total_tokens).bright_magenta().bold());
         println!();
         
         let display_limit = limit.unwrap_or(10);
         let recent_data: Vec<_> = sorted_data.iter().take(display_limit).collect();
-        println!("📅 Recent session usage (last {}):", recent_data.len());
+        println!("{} Recent session usage (last {}):", "📅".bright_blue(), recent_data.len().to_string().bright_white().bold());
         for session in recent_data {
             let session_name = self.format_session_name(session);
             let tokens = session.input_tokens + session.output_tokens + 
                         session.cache_creation_tokens + session.cache_read_tokens;
-            println!("   {} | {}: ${:.2} ({} tokens)", 
-                     session.last_activity, session_name, session.total_cost, format_with_commas(tokens));
+            println!("   {} | {}: {} ({} tokens)", 
+                     session.last_activity.bright_white().bold(),
+                     session_name.bright_cyan(),
+                     format!("${:.2}", session.total_cost).bright_green(),
+                     format_with_commas(tokens).bright_magenta());
         }
     }
 
@@ -129,22 +139,22 @@ impl DisplayManager {
             return;
         }
         
-        println!("\n{}", "=".repeat(80));
-        println!("Claude Code Usage Report - Blocks (All Instances)");
-        println!("{}", "=".repeat(80));
+        println!("\n{}", "=".repeat(80).bright_cyan());
+        println!("{}", "Claude Code Usage Report - Blocks (All Instances)".bright_white().bold());
+        println!("{}", "=".repeat(80).bright_cyan());
         
         let total_cost: f64 = blocks.iter().map(|b| b.cost_usd).sum();
         let total_tokens: u32 = blocks.iter().map(|b| b.token_counts.total()).sum();
         
-        println!("\n📊 Total Usage Summary:");
-        println!("   Records: {}", blocks.len());
-        println!("   Total Cost: ${:.2}", if total_cost == 0.0 { 0.0 } else { total_cost });
-        println!("   Total Tokens: {}", format_with_commas(total_tokens));
+        println!("\n{} Total Usage Summary:", "📊".bright_yellow());
+        println!("   Records: {}", blocks.len().to_string().bright_white().bold());
+        println!("   Total Cost: {}", format!("${:.2}", if total_cost == 0.0 { 0.0 } else { total_cost }).bright_green().bold());
+        println!("   Total Tokens: {}", format_with_commas(total_tokens).bright_magenta().bold());
         println!();
         
         let display_limit = limit.unwrap_or(10);
         let recent_data: Vec<_> = blocks.iter().rev().take(display_limit).collect();
-        println!("📅 Recent blocks usage (last {}):", recent_data.len());
+        println!("{} Recent blocks usage (last {}):", "📅".bright_blue(), recent_data.len().to_string().bright_white().bold());
         for block in recent_data.iter().rev() {
             // Parse and format start time
             let start_time = if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(&block.start_time) {
@@ -154,7 +164,10 @@ impl DisplayManager {
             };
             
             let tokens = block.token_counts.total();
-            println!("   {}: ${:.2} ({} tokens)", start_time, block.cost_usd, format_with_commas(tokens));
+            println!("   {}: {} ({} tokens)", 
+                     start_time.bright_white().bold(),
+                     format!("${:.2}", block.cost_usd).bright_green(),
+                     format_with_commas(tokens).bright_magenta());
         }
     }
 
@@ -176,13 +189,8 @@ impl DisplayManager {
             let mut project_groups: HashMap<String, DailyProject> = HashMap::new();
             
             for session in &sessions {
-                // Extract project name from sessionId
-                let project_name = if session.session_id.starts_with('-') {
-                    let parts: Vec<&str> = session.session_id[1..].split('-').collect();
-                    parts.last().unwrap_or(&"unknown").to_string()
-                } else {
-                    session.project_path.split('/').last().unwrap_or("unknown").to_string()
-                };
+                // Use the project_path as-is (it already contains our processed name)
+                let project_name = session.project_path.clone();
                 
                 let project = project_groups.entry(project_name.clone()).or_insert_with(|| {
                     DailyProject {
@@ -201,7 +209,7 @@ impl DisplayManager {
             
             let day_total = sessions.iter().map(|s| s.total_cost).sum();
             let mut projects: Vec<DailyProject> = project_groups.into_values().collect();
-            projects.sort_by(|a, b| b.total_cost.partial_cmp(&a.total_cost).unwrap());
+            projects.sort_by(|a, b| a.project.cmp(&b.project));
             
             result.push(DailyData {
                 date,
