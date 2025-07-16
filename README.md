@@ -1,6 +1,6 @@
 # 📊 Goobits Claude Usage
 
-A fast Python implementation for comprehensive Claude usage analysis across multiple VMs and instances. Track token consumption, costs, and session activity with real-time monitoring capabilities. Complete rewrite of the original Node.js-based [ccusage](https://github.com/ryoppippi/ccusage) with enhanced performance and features.
+A high-performance Rust implementation for comprehensive Claude usage analysis across multiple VMs and instances. Track token consumption, costs, and session activity with real-time monitoring capabilities. Complete rewrite of the original Node.js-based [ccusage](https://github.com/ryoppippi/ccusage) with 3-10x performance improvements.
 
 ## 📋 Table of Contents
 
@@ -17,54 +17,21 @@ A fast Python implementation for comprehensive Claude usage analysis across mult
 
 ## 📦 Installation
 
-### Python Version (Original)
-
-```bash
-# Install globally with pipx (recommended)
-pipx install .                     # Install globally, isolated environment
-pipx install .[dev]               # Install with development dependencies
-
-# Or with pip for development
-pip install -e .                   # Install editable for development
-python3 claude_usage.py --help    # Verify installation
-```
-
-### Rust Version (High Performance) 🚀
-
-**3-10x faster performance with identical functionality:**
-
 ```bash
 # Install from source
-cd rust && cargo install --path .
+cargo install --path .
 
-# Or use the install script
-./scripts/install_rust.sh
+# Or use the setup script
+./setup.sh install
 
-# Run the high-performance version
-claude-usage --help               # Verify installation
+# Verify installation
+claude-usage --help               # Show available commands
 claude-usage daily                # Test basic functionality
-```
-
-### Build Both Versions
-
-```bash
-# Build both Python and Rust versions
-./scripts/build_all.sh
-
-# Compare performance
-./benchmarks/run_benchmarks.sh
 ```
 
 ## 🎯 Basic Usage
 
-**Both Python and Rust versions have identical CLI interfaces:**
-
 ```bash
-# Python version
-python3 claude_usage.py daily      # Daily usage with project breakdown
-python3 claude_usage.py live       # Real-time monitoring
-
-# Rust version (faster)
 claude-usage daily                 # Daily usage with project breakdown
 claude-usage monthly               # Monthly aggregation
 claude-usage session              # Recent session activity
@@ -178,13 +145,6 @@ The live monitor provides real-time tracking with:
 
 ## 🛠️ Tech Stack
 
-### Python Version
-- **Python 3.8+** with standard library (pathlib, json, datetime)
-- **Requests** for live pricing data from LiteLLM API
-- **Single module** design for easy deployment
-- **Cross-platform** support (Windows, macOS, Linux)
-
-### Rust Version
 - **Rust 1.80+** with high-performance libraries
 - **Serde** for zero-copy JSON serialization
 - **Tokio** for async runtime and live monitoring
