@@ -1,4 +1,4 @@
-# 📊 Claude Usage
+# 📊 Goobits Claude Usage
 
 A fast Python implementation for comprehensive Claude usage analysis across multiple VMs and instances. Track token consumption, costs, and session activity with real-time monitoring capabilities. Complete rewrite of the original Node.js-based [ccusage](https://github.com/ryoppippi/ccusage) with enhanced performance and features.
 

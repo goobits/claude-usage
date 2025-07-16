@@ -1,213 +1,135 @@
-# CLAUDE USAGE IMPROVEMENT PROPOSAL
+# Claude Usage: Integration with Claude Keeper Proposal
 
-## Overview
-This proposal outlines a 5-phase implementation plan to improve Claude Usage with proper 5-hour window detection, interactive plan configuration, and complete Rust-Python parity.
+## Implementation Order
+1. **claude-keeper** builds Rust-based foundation + provides stable APIs
+2. **claude-insights** migrates to use claude-keeper (removes storage code)  
+3. **claudeusage** migrates to use claude-keeper (removes data handling)
 
-## Phase 1: Interactive Plan Configuration
-**Goal**: Add user-friendly plan selection on first run
+## Vision
 
-### Files to Modify:
-1. **rust/src/models.rs** (line ~50)
-   - Add `PlanType` enum:
+Migrate claudeusage from standalone data handling to leverage claude-keeper's shared parquet infrastructure while maintaining high-performance usage tracking and real-time monitoring capabilities.
+
+## Core Migration
+
+**From**: Standalone JSONL parsing and data discovery  
+**To**: High-performance consumer of claude-keeper's shared data platform
+
+## Architecture Integration
+
+### Current Capabilities (Remove)
+- JSONL file discovery and parsing
+- Multi-VM conversation data collection
+- Deduplication logic
+- Raw conversation file processing
+
+### Enhanced Capabilities (Keep & Improve)
+- Real-time usage monitoring with live progress bars
+- 5-hour window detection for accurate usage tracking
+- Token and cost analysis with burn rate calculations
+- High-performance Rust implementation
+- Sub-second analysis performance
+
+## New Architecture
+
+```
+claudeusage/
+├── rust/src/
+│   ├── main.rs               # CLI entry point
+│   ├── monitor.rs            # Enhanced: Real-time monitoring
+│   ├── analyzer.rs           # Enhanced: Usage analysis via claude-keeper
+│   ├── windows.rs            # New: 5-hour window detection
+│   ├── config.rs             # New: Plan configuration (Pro/Max5/Max20)
+│   ├── display.rs            # Existing: Output formatting
+│   └── models.rs             # Simplified: Usage-specific models
+├── claude_usage.py           # Simplified: Python wrapper for compatibility
+└── pyproject.toml            # Updated: Add claude-keeper dependency
+```
+
+## Integration Strategy
+
+### Phase 1: Add claude-keeper Dependency
+1. **Add claude-keeper to requirements** and cargo dependencies
+2. **Replace data discovery** with claude-keeper Rust APIs:
    ```rust
-   pub enum PlanType {
-       Pro,     // 200K tokens
-       Max5,    // 400K tokens  
-       Max20,   // 880K tokens
-   }
+   use claude_keeper::storage::ConversationLoader;
+   use claude_keeper::discovery::find_conversation_sources;
    ```
+3. **Remove local JSONL parsing** and file discovery code
 
-2. **rust/src/config.rs** (NEW FILE)
-   - Create config management module
-   - Functions to add:
-     - `load_config() -> Option<Config>`
-     - `save_config(config: &Config) -> Result<()>`
-     - `prompt_for_plan() -> PlanType`
-   - Config location: `~/.claude-usage/config.json`
-
-3. **rust/src/main.rs** (line ~150, in run_command)
-   - Before executing commands, check for config:
+### Phase 2: Migrate Core Functions
+1. **Update analyzer.rs** to use claude-keeper's API:
    ```rust
-   let config = config::load_config()
-       .unwrap_or_else(|| {
-           let plan = config::prompt_for_plan();
-           let config = Config::new(plan);
-           config::save_config(&config).unwrap();
-           config
-       });
+   use claude_keeper::{ConversationLoader, DataMode, OptimizeFor};
+   
+   let loader = ConversationLoader::new();
+   let conversations = loader.load_conversations(
+       Some(date_range),
+       None, // all projects
+       None, // all VMs
+       DataMode::Hybrid,
+       OptimizeFor::Usage,
+   )?;
    ```
+2. **Remove deduplication logic** (handled by claude-keeper)
+3. **Keep specialized usage calculations** (5-hour windows, burn rates)
 
-4. **rust/src/cli.rs** (line ~30)
-   - Add `--plan` flag to Args struct
-   - Add new `config` subcommand
+### Phase 3: Enhance Usage-Specific Features
+1. **Implement 5-hour window detection** using claude-keeper's clean data
+2. **Add interactive plan configuration** (Pro/Max5/Max20)
+3. **Optimize live monitoring** with claude-keeper's efficient data access
 
-### Config Format:
-```json
-{
-  "plan": "max20",
-  "token_limits": {
-    "pro": 200000,
-    "max5": 400000,
-    "max20": 880000
-  },
-  "window_duration_hours": 5
-}
+## Key Benefits
+
+### Code Simplification
+- **Remove 40% of data handling code** (discovery, parsing, deduplication)
+- **Focus on usage-specific analysis** rather than data infrastructure
+- **Maintain Rust performance** while leveraging shared parquet storage
+
+### Enhanced Reliability
+- **Consistent data** across all Claude analysis tools
+- **Format resilience** via claude-keeper's schema monitoring
+- **Reduced maintenance** of data pipeline code
+
+### Improved Features
+- **Faster startup** using pre-processed parquet data
+- **More accurate analysis** with claude-keeper's deduplication
+- **Better multi-VM support** via shared infrastructure
+
+## Usage-Specific Optimizations
+
+### Near Real-Time Monitoring (3-second updates)
+```rust
+// Live monitoring approach
+let loader = ConversationLoader::new();
+
+// Get cached historical data
+let historical = loader.load_conversations(
+    Some(older_date_range),
+    None, None,
+    DataMode::CacheOnly,  // Fast cached data
+    OptimizeFor::Usage,
+)?;
+
+// Get live updates every 3 seconds
+let live_updates = loader.get_live_updates(
+    last_check_timestamp,
+    OptimizeFor::Usage,
+)?;
 ```
 
-## Phase 2: 5-Hour Window Detection
-**Goal**: Implement gap-based window detection for accurate usage tracking
+**Benefits:**
+- **No cache corruption risk**: Live monitoring bypasses cache entirely
+- **Speed**: Historical data from fast cache, only recent files parsed live
+- **Safety**: Atomic cache updates with file locking
+- **Efficiency**: Only check modification times every 3 seconds
 
-### Files to Modify:
-1. **rust/src/windows.rs** (NEW FILE)
-   - Core window detection logic
-   - Functions to add:
-     - `detect_usage_windows(entries: Vec<Entry>) -> Vec<Window>`
-     - `find_window_gaps(entries: &[Entry]) -> Vec<usize>`
-     - `split_at_boundaries(entries: Vec<Entry>, boundary: DateTime) -> (Vec<Entry>, Vec<Entry>)`
+## Cross-Tool Dependencies
 
-2. **rust/src/parser.rs** (line ~100)
-   - Modify `parse_entries()` to collect ALL timestamps first
-   - Remove current session-based grouping
-   - Add `sort_by_timestamp()` helper
+### Prerequisite: claude-keeper Phase 2 completion (ConversationLoader API ready)
+### Coordination: claudeusage migrates itself after claude-keeper APIs are stable  
+### Self-Migration: claudeusage team handles its own migration to claude-keeper
+### No Performance Issues: Direct Rust-to-Rust API calls, no language boundary overhead
 
-3. **rust/src/analyzer.rs** (line ~200)
-   - Replace session-based analysis with window-based
-   - Update `analyze_usage()` to call `windows::detect_usage_windows()`
-   - Remove `group_by_session()` calls
+---
 
-4. **rust/src/models.rs** (line ~80)
-   - Add `Window` struct:
-   ```rust
-   pub struct Window {
-       pub start_time: DateTime<Utc>,
-       pub end_time: DateTime<Utc>,
-       pub entries: Vec<UsageEntry>,
-       pub total_tokens: TokenCounts,
-       pub exceeded_limit: bool,
-   }
-   ```
-
-### Window Detection Algorithm:
-```
-1. Parse all JSONL entries across all files
-2. Sort globally by timestamp
-3. Find gaps >5 hours between consecutive entries
-4. Create windows at gap boundaries
-5. Split conversations that span boundaries
-```
-
-## Phase 3: Fix Remaining Parity Issues
-**Goal**: Resolve final 0.2% precision differences between Rust and Python
-
-### Files to Investigate:
-1. **rust/src/pricing.rs** vs **claude_usage.py** (lines 70-100)
-   - Compare cost calculation precision
-   - Check for f32 vs f64 differences
-   - Verify pricing data matches exactly
-
-2. **rust/src/dedup.rs** (line ~150)
-   - Verify deduplication timing matches Python
-   - Check hash calculation consistency
-   - Ensure messageId:requestId format identical
-
-3. **rust/src/parser.rs** (line ~50)
-   - Compare token extraction logic
-   - Verify all token types counted
-   - Check for edge cases in parsing
-
-### Specific Checks:
-- Float precision: Ensure all calculations use f64
-- Rounding: Match Python's rounding behavior
-- Token counting: Include all token types consistently
-- Cost aggregation: Sum in same order as Python
-
-## Phase 4: Update Live Monitoring
-**Goal**: Show accurate window-based progress instead of hardcoded limits
-
-### Files to Modify:
-1. **rust/src/monitor.rs** (line ~25)
-   - Remove hardcoded TOKEN_LIMIT constant
-   - Replace with config-based limits:
-   ```rust
-   let token_limit = match config.plan {
-       PlanType::Pro => 200_000,
-       PlanType::Max5 => 400_000,
-       PlanType::Max20 => 880_000,
-   };
-   ```
-
-2. **rust/src/monitor.rs** (line ~274, find_active_session_block)
-   - Replace session-based logic with window detection
-   - Show current window instead of session
-   - Calculate time remaining in window
-
-3. **rust/src/monitor.rs** (line ~112, display_active_session)
-   - Update displays to show:
-     - Current 5-hour window progress
-     - Time until window reset
-     - Tokens used vs plan limit
-     - Better burn rate calculation
-
-### Display Updates:
-```
-⚡ Tokens: [████████░░] 440K / 880K (Max20)
-⏰ Window: 2h 15m remaining (resets at 14:30)
-🔥 Burn rate: 3,200 tok/min
-```
-
-## Phase 5: Performance Optimization
-**Goal**: Cache processed data to avoid reprocessing
-
-### Files to Create/Modify:
-1. **rust/src/cache.rs** (NEW FILE)
-   - Window cache management
-   - Functions to add:
-     - `load_cache() -> Option<WindowCache>`
-     - `save_cache(windows: &[Window]) -> Result<()>`
-     - `merge_new_entries(cache: WindowCache, new: Vec<Entry>) -> WindowCache`
-
-2. **rust/src/analyzer.rs** (line ~100)
-   - Check cache before processing
-   - Only process new entries since last cache
-   - Update cache after processing
-
-3. **Cache Format Options**:
-   - JSON for simplicity: `~/.claude-usage/window_cache.json`
-   - Parquet for performance (if combining with other project)
-   - Include last_processed timestamp
-
-### Cache Strategy:
-```
-1. Load existing cache
-2. Find last processed timestamp
-3. Only parse JSONL entries after that timestamp
-4. Merge new windows with cached
-5. Save updated cache
-```
-
-## Implementation Notes
-
-### Testing Strategy:
-- Each phase should maintain backward compatibility
-- Test against Python version for parity
-- Verify window detection with edge cases
-- Ensure config migration for existing users
-
-### Error Handling:
-- Graceful fallbacks for missing config
-- Clear error messages for limit hits
-- Handle corrupted cache files
-- Timezone handling for global users
-
-### Future Enhancements:
-- Multi-user support (if Claude adds user IDs)
-- Webhook notifications for limit approaching
-- Historical window analysis
-- Export to various formats (CSV, Parquet)
-
-## Success Metrics
-1. Window detection accurately captures 5-hour usage patterns
-2. Plan configuration reduces user confusion
-3. Rust-Python parity within 0.1%
-4. Live monitoring shows real-time window progress
-5. Performance: <1 second for daily analysis with cache
+*This proposal transforms claudeusage into a specialized, high-performance usage analysis tool that leverages shared infrastructure while maintaining its unique real-time monitoring capabilities.*
