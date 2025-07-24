@@ -10,10 +10,8 @@ mod analyzer;
 mod display;
 mod monitor;
 mod pricing;
-mod utils;
 
 use analyzer::ClaudeUsageAnalyzer;
-use models::CostMode;
 use dedup::ProcessOptions;
 
 #[derive(Parser)]
@@ -34,16 +32,13 @@ enum Commands {
         json: bool,
         /// Show last N entries
         #[arg(long)]
-        last: Option<usize>,
+        limit: Option<usize>,
         /// Start date filter (YYYY-MM-DD)
         #[arg(long)]
         since: Option<String>,
         /// End date filter (YYYY-MM-DD)
         #[arg(long)]
         until: Option<String>,
-        /// Cost calculation mode
-        #[arg(long, value_enum, default_value = "auto")]
-        mode: CostModeArg,
     },
     /// Show monthly usage aggregation
     Monthly {
@@ -52,52 +47,13 @@ enum Commands {
         json: bool,
         /// Show last N entries
         #[arg(long)]
-        last: Option<usize>,
+        limit: Option<usize>,
         /// Start date filter (YYYY-MM-DD)
         #[arg(long)]
         since: Option<String>,
         /// End date filter (YYYY-MM-DD)
         #[arg(long)]
         until: Option<String>,
-        /// Cost calculation mode
-        #[arg(long, value_enum, default_value = "auto")]
-        mode: CostModeArg,
-    },
-    /// Show recent sessions
-    Session {
-        /// Output in JSON format
-        #[arg(long)]
-        json: bool,
-        /// Show last N entries
-        #[arg(long)]
-        last: Option<usize>,
-        /// Start date filter (YYYY-MM-DD)
-        #[arg(long)]
-        since: Option<String>,
-        /// End date filter (YYYY-MM-DD)
-        #[arg(long)]
-        until: Option<String>,
-        /// Cost calculation mode
-        #[arg(long, value_enum, default_value = "auto")]
-        mode: CostModeArg,
-    },
-    /// Show session blocks
-    Blocks {
-        /// Output in JSON format
-        #[arg(long)]
-        json: bool,
-        /// Show last N entries
-        #[arg(long)]
-        last: Option<usize>,
-        /// Start date filter (YYYY-MM-DD)
-        #[arg(long)]
-        since: Option<String>,
-        /// End date filter (YYYY-MM-DD)
-        #[arg(long)]
-        until: Option<String>,
-        /// Cost calculation mode
-        #[arg(long, value_enum, default_value = "auto")]
-        mode: CostModeArg,
     },
     /// Show live monitoring
     Live {
@@ -110,25 +66,6 @@ enum Commands {
     },
 }
 
-#[derive(clap::ValueEnum, Clone)]
-enum CostModeArg {
-    /// Use costUSD if available, otherwise calculate
-    Auto,
-    /// Always calculate from tokens
-    Calculate,
-    /// Always use costUSD
-    Display,
-}
-
-impl From<CostModeArg> for CostMode {
-    fn from(mode: CostModeArg) -> Self {
-        match mode {
-            CostModeArg::Auto => CostMode::Auto,
-            CostModeArg::Calculate => CostMode::Calculate,
-            CostModeArg::Display => CostMode::Display,
-        }
-    }
-}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -137,43 +74,24 @@ async fn main() -> Result<()> {
     // Handle command with its specific options
     match cli.command.unwrap_or(Commands::Daily {
         json: false,
-        last: None,
+        limit: None,
         since: None,
         until: None,
-        mode: CostModeArg::Auto,
     }) {
-        Commands::Daily { json, last, since, until, mode } => {
+        Commands::Daily { json, limit, since, until } => {
             let (_since_date, _until_date, mut analyzer, options) = 
-                parse_common_args(json, last, since, until, mode, "daily");
+                parse_common_args(json, limit, since, until, "daily");
             
             match analyzer.run_command("daily", options).await {
                 Ok(_) => Ok(()),
                 Err(e) => handle_error(e, json),
             }
         }
-        Commands::Monthly { json, last, since, until, mode } => {
+        Commands::Monthly { json, limit, since, until } => {
             let (_since_date, _until_date, mut analyzer, options) = 
-                parse_common_args(json, last, since, until, mode, "monthly");
+                parse_common_args(json, limit, since, until, "monthly");
             
             match analyzer.run_command("monthly", options).await {
-                Ok(_) => Ok(()),
-                Err(e) => handle_error(e, json),
-            }
-        }
-        Commands::Session { json, last, since, until, mode } => {
-            let (_since_date, _until_date, mut analyzer, options) = 
-                parse_common_args(json, last, since, until, mode, "session");
-            
-            match analyzer.run_command("session", options).await {
-                Ok(_) => Ok(()),
-                Err(e) => handle_error(e, json),
-            }
-        }
-        Commands::Blocks { json, last, since, until, mode } => {
-            let (_since_date, _until_date, mut analyzer, options) = 
-                parse_common_args(json, last, since, until, mode, "blocks");
-            
-            match analyzer.run_command("blocks", options).await {
                 Ok(_) => Ok(()),
                 Err(e) => handle_error(e, json),
             }
@@ -184,11 +102,11 @@ async fn main() -> Result<()> {
                 process::exit(1);
             }
             
-            let mut analyzer = ClaudeUsageAnalyzer::new(CostMode::Auto);
+            let mut analyzer = ClaudeUsageAnalyzer::new();
             let options = ProcessOptions {
                 command: "live".to_string(),
                 json_output: json,
-                last: None,
+                limit: None,
                 since_date: None,
                 until_date: None,
                 snapshot,
@@ -204,10 +122,9 @@ async fn main() -> Result<()> {
 
 fn parse_common_args(
     json: bool,
-    last: Option<usize>,
+    limit: Option<usize>,
     since: Option<String>,
     until: Option<String>,
-    mode: CostModeArg,
     command: &str,
 ) -> (Option<chrono::DateTime<chrono::Utc>>, Option<chrono::DateTime<chrono::Utc>>, ClaudeUsageAnalyzer, ProcessOptions) {
     // Parse date filters
@@ -240,13 +157,13 @@ fn parse_common_args(
     };
     
     // Create analyzer
-    let analyzer = ClaudeUsageAnalyzer::new(mode.into());
+    let analyzer = ClaudeUsageAnalyzer::new();
     
     // Build options
     let options = ProcessOptions {
         command: command.to_string(),
         json_output: json,
-        last,
+        limit,
         since_date,
         until_date,
         snapshot: false,

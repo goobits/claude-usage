@@ -13,7 +13,7 @@ The application is built using a modular Rust architecture with these key compon
 - **Data Discovery**: Automatically finds Claude instances in `~/.claude/` and `~/.claude/vms/*/`
 - **Global Deduplication**: Uses messageId:requestId hashing to prevent duplicate counting across VMs
 - **Cost Calculation**: Fetches live pricing from LiteLLM API with fallback to hardcoded rates
-- **Multiple Display Modes**: Daily, monthly, session, blocks, and live monitoring views
+- **Multiple Display Modes**: Daily, monthly, and live monitoring views
 - **Performance Optimization**: File-level date filtering, streaming JSON parsing, and time-windowed deduplication
 
 ### Key Data Flow
@@ -48,8 +48,6 @@ claude-usage [command] [options]
 # Basic usage reports
 claude-usage daily           # Daily breakdown with projects
 claude-usage monthly         # Monthly aggregation
-claude-usage session         # Recent sessions
-claude-usage blocks          # Session blocks
 
 # Live monitoring
 claude-usage live            # Real-time monitoring
@@ -57,22 +55,18 @@ claude-usage live --snapshot # One-time snapshot
 
 # Date filtering
 claude-usage daily --since 2024-01-01 --until 2024-01-31
-claude-usage session --last 5
+claude-usage daily --limit 5
 
 # JSON output
 claude-usage daily --json
 
-# Cost calculation modes
-claude-usage daily --mode calculate  # Always calculate from tokens
-claude-usage daily --mode display    # Use stored costUSD values
-claude-usage daily --mode auto       # Prefer costUSD, fallback to calculation
 ```
 
 ## Data Sources
 
 The tool reads Claude Code's usage data from:
 - `~/.claude/projects/*/conversation_*.jsonl` - Main conversation logs
-- `~/.claude/usage_tracking/session_blocks_*.json` - Session timing blocks
+- `~/.claude/usage_tracking/session_blocks_*.json` - Session timing blocks (used by live monitor)
 - `~/.claude/vms/*/projects/*/` - VM-specific instances
 
 Each JSONL entry contains message usage data with token counts, model info, and timestamps that get aggregated into sessions and cost calculations.
@@ -83,7 +77,7 @@ Test the tool by running it against your actual Claude Code usage data:
 
 ```bash
 # Verify data discovery
-claude-usage session --last 1
+claude-usage daily --limit 1
 
 # Test live monitoring (Ctrl+C to exit)
 claude-usage live --snapshot
@@ -98,3 +92,6 @@ Built as a standard Rust binary with entry point:
 - `Cargo.toml` defines the `claude-usage` binary
 - Modular source code in `src/` directory for maintainability
 - Minimal dependencies (only `reqwest` for pricing data)
+
+### Temporary Files
+When creating temporary debug or test scripts, use `/tmp` directory to keep the project clean.

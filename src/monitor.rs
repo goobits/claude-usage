@@ -1,7 +1,7 @@
 use crate::models::*;
 use crate::parser::FileParser;
 use anyhow::Result;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use std::io::{self, Write};
 use std::time::Duration;
 use tokio::time;
@@ -13,9 +13,9 @@ pub struct LiveMonitor {
 }
 
 impl LiveMonitor {
-    pub fn new(cost_mode: CostMode) -> Self {
+    pub fn new() -> Self {
         Self {
-            parser: FileParser::new(cost_mode),
+            parser: FileParser::new(),
             cached_blocks: None,
             cache_time: None,
         }
@@ -290,7 +290,8 @@ impl LiveMonitor {
         }
         
         // Load fresh session blocks
-        let blocks = self.parser.load_session_blocks()?;
+        let claude_paths = self.parser.discover_claude_paths()?;
+        let blocks = self.parser.get_latest_session_blocks(&claude_paths)?;
         let now = Utc::now();
         
         // Find active block
@@ -305,19 +306,7 @@ impl LiveMonitor {
             }
         }
         
-        // No active session blocks found - implement fallback to current session data
-        if let Ok(current_session_data) = self.get_current_session_data().await {
-            if let Some(synthetic_block) = current_session_data {
-                // Update cache with synthetic block
-                let mut updated_blocks = blocks.clone();
-                updated_blocks.push(synthetic_block.clone());
-                self.cached_blocks = Some(updated_blocks);
-                self.cache_time = Some(current_time);
-                return Ok(Some(synthetic_block));
-            }
-        }
-        
-        // No active session blocks or current session data found
+        // No active session blocks found
         self.cached_blocks = Some(blocks.clone());
         self.cache_time = Some(current_time);
         Ok(None)
@@ -371,116 +360,4 @@ impl LiveMonitor {
         io::stdout().flush().unwrap();
     }
 
-    async fn get_current_session_data(&self) -> Result<Option<SessionBlock>> {
-        
-        let paths = self.parser.discover_claude_paths()?;
-        let now = Utc::now();
-        let cutoff_time = now - chrono::Duration::minutes(10); // Look at last 10 minutes
-        let activity_cutoff = now - chrono::Duration::minutes(2); // Recent activity within 2 minutes
-        
-        let mut total_input_tokens = 0;
-        let mut total_output_tokens = 0;
-        let mut total_cache_creation_tokens = 0;
-        let mut total_cache_read_tokens = 0;
-        let mut total_cost = 0.0;
-        let mut earliest_activity = None;
-        let mut latest_activity = None;
-        let mut has_recent_activity = false;
-        
-        for claude_path in paths {
-            let file_tuples = self.parser.find_jsonl_files(&[claude_path])?;
-            
-            for (jsonl_file, _session_dir) in file_tuples {
-                // Check if file was modified recently
-                if let Ok(metadata) = std::fs::metadata(&jsonl_file) {
-                    if let Ok(modified) = metadata.modified() {
-                        let modified_time = DateTime::<Utc>::from(modified);
-                        if modified_time < cutoff_time {
-                            continue;
-                        }
-                    }
-                }
-                
-                // Parse entries from this file
-                let entries = self.parser.parse_jsonl_file(&jsonl_file)?;
-                
-                for entry in entries {
-                    // Skip entries with no usage data
-                    let Some(usage) = &entry.message.usage else {
-                        continue;  // Skip entries without usage data
-                    };
-                    if usage.input_tokens == 0 && usage.output_tokens == 0 {
-                        continue;
-                    }
-                    
-                    // Parse timestamp
-                    if let Ok(timestamp) = self.parser.parse_timestamp(&entry.timestamp) {
-                        if timestamp < cutoff_time {
-                            continue;
-                        }
-                        
-                        // Check if this is recent activity
-                        if timestamp > activity_cutoff {
-                            has_recent_activity = true;
-                        }
-                        
-                        // Track earliest and latest activity
-                        if earliest_activity.is_none() || timestamp < earliest_activity.unwrap() {
-                            earliest_activity = Some(timestamp);
-                        }
-                        if latest_activity.is_none() || timestamp > latest_activity.unwrap() {
-                            latest_activity = Some(timestamp);
-                        }
-                        
-                        // Aggregate usage data
-                        if let Some(usage) = &entry.message.usage {
-                            total_input_tokens += usage.input_tokens;
-                            total_output_tokens += usage.output_tokens;
-                            total_cache_creation_tokens += usage.cache_creation_input_tokens;
-                            total_cache_read_tokens += usage.cache_read_input_tokens;
-                        }
-                        
-                        // Calculate cost
-                        if let Some(cost) = entry.cost_usd {
-                            total_cost += cost;
-                        } else {
-                            // Fallback to cost calculation from tokens
-                            let entry_cost = if let Some(usage) = &entry.message.usage {
-                                crate::pricing::PricingManager::calculate_cost_from_tokens(
-                                    usage, 
-                                    &entry.message.model
-                                ).await
-                            } else {
-                                0.0
-                            };
-                            total_cost += entry_cost;
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Only create synthetic session block if we have recent activity
-        if !has_recent_activity || earliest_activity.is_none() || latest_activity.is_none() {
-            return Ok(None);
-        }
-        
-        let start_time = earliest_activity.unwrap();
-        let end_time = latest_activity.unwrap() + chrono::Duration::minutes(10); // Extend end time by 10 minutes
-        
-        // Create synthetic session block
-        let synthetic_block = SessionBlock {
-            start_time: start_time.to_rfc3339(),
-            end_time: end_time.to_rfc3339(),
-            token_counts: TokenCounts {
-                input_tokens: total_input_tokens,
-                output_tokens: total_output_tokens,
-                cache_creation_input_tokens: total_cache_creation_tokens,
-                cache_read_input_tokens: total_cache_read_tokens,
-            },
-            cost_usd: total_cost,
-        };
-        
-        Ok(Some(synthetic_block))
-    }
 }

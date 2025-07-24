@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageEntry {
@@ -31,6 +31,15 @@ pub struct UsageData {
 }
 
 #[derive(Debug, Clone)]
+pub struct DailyUsage {
+    pub input_tokens: u32,
+    pub output_tokens: u32,
+    pub cache_creation_tokens: u32,
+    pub cache_read_tokens: u32,
+    pub cost: f64,
+}
+
+#[derive(Debug, Clone)]
 pub struct SessionData {
     pub session_id: String,
     pub project_path: String,
@@ -41,6 +50,7 @@ pub struct SessionData {
     pub total_cost: f64,
     pub last_activity: Option<String>,
     pub models_used: HashSet<String>,
+    pub daily_usage: HashMap<String, DailyUsage>,  // Track usage per day
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -63,6 +73,8 @@ pub struct SessionOutput {
     pub last_activity: String,
     #[serde(rename = "modelsUsed")]
     pub models_used: Vec<String>,
+    #[serde(skip)]
+    pub daily_usage: HashMap<String, DailyUsage>,  // Daily breakdown for internal use
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -127,22 +139,6 @@ pub struct PricingData {
 }
 
 
-#[derive(Debug, Clone)]
-pub enum CostMode {
-    Auto,
-    Calculate,
-    Display,
-}
-
-impl From<&str> for CostMode {
-    fn from(s: &str) -> Self {
-        match s {
-            "calculate" => CostMode::Calculate,
-            "display" => CostMode::Display,
-            _ => CostMode::Auto,
-        }
-    }
-}
 
 impl SessionData {
     pub fn new(session_id: String, project_path: String) -> Self {
@@ -156,6 +152,7 @@ impl SessionData {
             total_cost: 0.0,
             last_activity: None,
             models_used: HashSet::new(),
+            daily_usage: HashMap::new(),
         }
     }
 
@@ -180,6 +177,7 @@ impl From<SessionData> for SessionOutput {
                 models.sort();
                 models
             },
+            daily_usage: data.daily_usage,
         }
     }
 }

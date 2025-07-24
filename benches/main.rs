@@ -1,6 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use claude_usage::parser::FileParser;
-use claude_usage::models::CostMode;
 use std::path::PathBuf;
 use tempfile::TempDir;
 use std::fs;
@@ -33,7 +32,7 @@ fn benchmark_jsonl_parsing(c: &mut Criterion) {
     let temp_dir = TempDir::new().unwrap();
     let jsonl_path = create_large_jsonl_file(temp_dir.path(), 1000).unwrap();
     
-    let parser = FileParser::new(CostMode::Auto);
+    let parser = FileParser::new();
     
     c.bench_function("parse_jsonl_1000_entries", |b| {
         b.iter(|| {
@@ -44,7 +43,7 @@ fn benchmark_jsonl_parsing(c: &mut Criterion) {
 }
 
 fn benchmark_timestamp_parsing(c: &mut Criterion) {
-    let parser = FileParser::new(CostMode::Auto);
+    let parser = FileParser::new();
     
     c.bench_function("parse_timestamp", |b| {
         b.iter(|| {
@@ -55,7 +54,7 @@ fn benchmark_timestamp_parsing(c: &mut Criterion) {
 }
 
 fn benchmark_session_info_extraction(c: &mut Criterion) {
-    let parser = FileParser::new(CostMode::Auto);
+    let parser = FileParser::new();
     
     c.bench_function("extract_session_info", |b| {
         b.iter(|| {

@@ -1,6 +1,6 @@
 # 📊 Goobits Claude Usage
 
-A high-performance Rust implementation for comprehensive Claude usage analysis across multiple VMs and instances. Track token consumption, costs, and session activity with real-time monitoring capabilities. Complete rewrite of the original Node.js-based [ccusage](https://github.com/ryoppippi/ccusage) with 3-10x performance improvements.
+A high-performance Rust implementation for comprehensive Claude usage analysis across multiple VMs and instances. Track token consumption, costs, and activity with real-time monitoring capabilities. Complete rewrite of the original Node.js-based [ccusage](https://github.com/ryoppippi/ccusage) with 3-10x performance improvements.
 
 ## 📋 Table of Contents
 
@@ -34,7 +34,6 @@ claude-usage daily                # Test basic functionality
 ```bash
 claude-usage daily                 # Daily usage with project breakdown
 claude-usage monthly               # Monthly aggregation
-claude-usage session              # Recent session activity
 claude-usage live                  # Real-time monitoring
 claude-usage live --snapshot       # One-time live snapshot
 ```
@@ -44,18 +43,11 @@ claude-usage live --snapshot       # One-time live snapshot
 ```bash
 # Daily breakdown with project details
 claude-usage daily                 # Last 30 days by default
-claude-usage daily --last 7       # Last 7 days only
+claude-usage daily --limit 7      # Last 7 days only
 
 # Monthly aggregation
 claude-usage monthly               # Historical monthly totals
-claude-usage monthly --last 3     # Last 3 months
-
-# Session analysis
-claude-usage session              # Recent sessions
-claude-usage session --last 10    # Last 10 sessions
-
-# Session blocks (timing data)
-claude-usage blocks               # Session timing blocks
+claude-usage monthly --limit 3    # Last 3 months
 ```
 
 ## 🔴 Live Monitoring
@@ -76,26 +68,12 @@ claude-usage live --snapshot --json | jq .
 ```bash
 # Date range filtering
 claude-usage daily --since 2024-01-01 --until 2024-01-31
-claude-usage session --since 2024-12-01
-
-# Quick filters
-claude-usage daily --week         # This week's data
-claude-usage daily --month        # This month's data
-claude-usage daily --year         # This year's data
-
-# Month-specific filters
-claude-usage daily --january      # January data
-claude-usage daily --december     # December data
+claude-usage monthly --since 2024-12-01
 ```
 
 ## 💰 Cost Calculation
 
 ```bash
-# Cost calculation modes
-claude-usage daily --mode auto        # Use stored costs, fallback to calculation (default)
-claude-usage daily --mode calculate   # Always calculate from tokens
-claude-usage daily --mode display     # Always use stored costUSD values
-
 # Real-time pricing updates
 # Automatically fetches latest pricing from LiteLLM API
 # Falls back to hardcoded rates if API unavailable
@@ -109,7 +87,7 @@ claude-usage daily                 # Formatted tables with emojis
 
 # JSON output for scripts
 claude-usage daily --json | jq .
-claude-usage session --json | jq -r '.session[].sessionId'
+claude-usage monthly --json | jq -r '.monthly[].totalCost'
 
 # Integration examples
 claude-usage daily --json | jq '[.daily[].totalCost] | add'
@@ -121,7 +99,7 @@ The tool automatically discovers and analyzes Claude Code usage data from:
 
 - **Main Instance**: `~/.claude/projects/*/conversation_*.jsonl`
 - **VM Instances**: `~/.claude/vms/*/projects/*/conversation_*.jsonl`
-- **Session Blocks**: `~/.claude/usage_tracking/session_blocks_*.json`
+- **Session Blocks**: `~/.claude/usage_tracking/session_blocks_*.json` (used by live monitor)
 
 **Global Deduplication**: Prevents double-counting when the same conversation appears across multiple VMs using messageId:requestId hashing.
 
@@ -139,7 +117,7 @@ The live monitor provides real-time tracking with:
 
 - **Token Usage**: Progress bars showing consumption vs. limits
 - **Cost Tracking**: Budget monitoring with burn rate calculations
-- **Session Timing**: Time remaining until session reset
+- **Session Timing**: Time remaining until session reset (when session blocks available)
 - **Multi-VM Support**: Aggregated view across all active Claude instances
 - **Burn Rate Analysis**: Real-time tokens/minute and cost/hour calculations
 

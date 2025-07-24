@@ -1,4 +1,4 @@
-use crate::models::*;
+use crate::models::{*, DailyUsage};
 use crate::parser::FileParser;
 use crate::pricing::PricingManager;
 use dashmap::DashSet;
@@ -6,11 +6,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use anyhow::Result;
-use chrono::{DateTime, Utc, Local};
+use chrono::{DateTime, Utc};
 use rayon::prelude::*;
 
 pub struct DeduplicationEngine {
-    cost_mode: CostMode,
     global_hashes: Arc<DashSet<String>>,
     hash_timestamps: Arc<dashmap::DashMap<String, DateTime<Utc>>>,
     dedup_window_hours: i64,
@@ -18,9 +17,8 @@ pub struct DeduplicationEngine {
 }
 
 impl DeduplicationEngine {
-    pub fn new(cost_mode: CostMode) -> Self {
+    pub fn new() -> Self {
         Self {
-            cost_mode,
             global_hashes: Arc::new(DashSet::new()),
             hash_timestamps: Arc::new(dashmap::DashMap::new()),
             dedup_window_hours: 24,
@@ -33,7 +31,7 @@ impl DeduplicationEngine {
         sorted_file_tuples: Vec<(PathBuf, PathBuf)>,
         options: &ProcessOptions,
     ) -> Result<Vec<SessionOutput>> {
-        let parser = FileParser::new(self.cost_mode.clone());
+        let parser = FileParser::new();
         let mut sessions_by_dir: HashMap<PathBuf, SessionData> = HashMap::new();
         
         let need_timestamps = matches!(options.command.as_str(), "daily" | "session" | "monthly");
@@ -41,8 +39,8 @@ impl DeduplicationEngine {
         let mut total_entries_skipped = 0;
         let mut session_count = 0;
         
-        // Early exit optimization for --last N queries
-        let should_stop_early = options.last.is_some() && options.command == "session";
+        // Early exit optimization for --limit N queries (only for session command)
+        let should_stop_early = options.limit.is_some() && options.command == "session";
         
         // Process files in parallel chunks for better performance
         let chunk_size = 10; // Process 10 files at a time
@@ -50,7 +48,7 @@ impl DeduplicationEngine {
         
         for chunk in sorted_file_tuples.chunks(chunk_size) {
             // Early exit optimization
-            if should_stop_early && session_count >= options.last.unwrap_or(0) {
+            if should_stop_early && session_count >= options.limit.unwrap_or(0) {
                 break;
             }
             
@@ -192,26 +190,46 @@ impl DeduplicationEngine {
                 let session_data = sessions_by_dir.entry(session_dir.clone())
                     .or_insert_with(|| SessionData::new(session_id, project_name));
                 
-                // Aggregate usage data
+                // Get the date for this entry (use UTC for consistent bucketing)
+                let entry_date = if let Ok(timestamp) = parser.parse_timestamp(&entry.timestamp) {
+                    timestamp.format("%Y-%m-%d").to_string()
+                } else {
+                    "unknown".to_string()
+                };
+                
+                // Update daily usage for this specific date
+                let daily = session_data.daily_usage.entry(entry_date.clone()).or_insert_with(|| {
+                    DailyUsage {
+                        input_tokens: 0,
+                        output_tokens: 0,
+                        cache_creation_tokens: 0,
+                        cache_read_tokens: 0,
+                        cost: 0.0,
+                    }
+                });
+                
+                // Aggregate usage data for this day
                 if let Some(usage) = &entry.message.usage {
+                    daily.input_tokens += usage.input_tokens;
+                    daily.output_tokens += usage.output_tokens;
+                    daily.cache_creation_tokens += usage.cache_creation_input_tokens;
+                    daily.cache_read_tokens += usage.cache_read_input_tokens;
+                    
+                    // Also update totals
                     session_data.input_tokens += usage.input_tokens;
                     session_data.output_tokens += usage.output_tokens;
                     session_data.cache_creation_tokens += usage.cache_creation_input_tokens;
                     session_data.cache_read_tokens += usage.cache_read_input_tokens;
                 }
+                daily.cost += entry_cost;
                 session_data.total_cost += entry_cost;
                 session_data.models_used.insert(entry.message.model.clone());
                 
                 // Update last activity if needed
                 if need_timestamps {
-                    if let Ok(timestamp) = parser.parse_timestamp(&entry.timestamp) {
-                        // Convert to local timezone like Python version does
-                        let local_timestamp = timestamp.with_timezone(&Local);
-                        let activity_date = local_timestamp.format("%Y-%m-%d").to_string();
-                        if session_data.last_activity.is_none() || 
-                           session_data.last_activity.as_ref().unwrap() < &activity_date {
-                            session_data.last_activity = Some(activity_date);
-                        }
+                    if session_data.last_activity.is_none() || 
+                       session_data.last_activity.as_ref().unwrap() < &entry_date {
+                        session_data.last_activity = Some(entry_date);
                     }
                 }
                 
@@ -239,36 +257,22 @@ impl DeduplicationEngine {
             .map(|session| session.into())
             .collect();
         
-        // Apply last limit if specified
-        if let Some(last) = options.last {
-            result.sort_by(|a, b| b.last_activity.cmp(&a.last_activity));
-            result.truncate(last);
+        // Apply limit if specified (only for session command, not daily/monthly)
+        if let Some(limit) = options.limit {
+            if options.command == "session" {
+                result.sort_by(|a, b| b.last_activity.cmp(&a.last_activity));
+                result.truncate(limit);
+            }
         }
         
         Ok(result)
     }
 
     async fn calculate_entry_cost(&self, entry: &UsageEntry) -> f64 {
-        match self.cost_mode {
-            CostMode::Display => {
-                entry.cost_usd.unwrap_or(0.0)
-            }
-            CostMode::Calculate => {
-                if let Some(usage) = &entry.message.usage {
-                    PricingManager::calculate_cost_from_tokens(usage, &entry.message.model).await
-                } else {
-                    0.0
-                }
-            }
-            CostMode::Auto => {
-                if let Some(cost) = entry.cost_usd {
-                    cost
-                } else if let Some(usage) = &entry.message.usage {
-                    PricingManager::calculate_cost_from_tokens(usage, &entry.message.model).await
-                } else {
-                    0.0
-                }
-            }
+        if let Some(usage) = &entry.message.usage {
+            PricingManager::calculate_cost_from_tokens(usage, &entry.message.model).await
+        } else {
+            0.0
         }
     }
 }
@@ -277,7 +281,7 @@ impl DeduplicationEngine {
 pub struct ProcessOptions {
     pub command: String,
     pub json_output: bool,
-    pub last: Option<usize>,
+    pub limit: Option<usize>,
     pub since_date: Option<DateTime<Utc>>,
     pub until_date: Option<DateTime<Utc>>,
     pub snapshot: bool,

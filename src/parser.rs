@@ -9,8 +9,78 @@ use glob::glob;
 
 pub struct FileParser {}
 
+// Trait for custom JSONL processing
+pub trait JsonlProcessor {
+    type Output;
+    
+    fn process_entry(&mut self, entry: UsageEntry, line_number: usize) -> Result<()>;
+    fn finalize(self) -> Result<Self::Output>;
+}
+
+// ProcessedEntry represents a parsed JSONL entry with extracted metadata
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct ProcessedEntry {
+    pub entry: UsageEntry,
+    pub timestamp: DateTime<Utc>,
+    pub date: String, // YYYY-MM-DD format
+    pub line_number: usize,
+    pub total_tokens: u32,
+}
+
+#[allow(dead_code)]
+impl ProcessedEntry {
+    pub fn new(entry: UsageEntry, parser: &FileParser, line_number: usize) -> Result<Self> {
+        let timestamp = parser.parse_timestamp(&entry.timestamp)?;
+        let date = timestamp.format("%Y-%m-%d").to_string();
+        let total_tokens = Self::calculate_total_tokens(&entry);
+        
+        Ok(Self {
+            entry,
+            timestamp,
+            date,
+            line_number,
+            total_tokens,
+        })
+    }
+    
+    fn calculate_total_tokens(entry: &UsageEntry) -> u32 {
+        if let Some(usage) = &entry.message.usage {
+            usage.input_tokens + 
+            usage.output_tokens + 
+            usage.cache_creation_input_tokens + 
+            usage.cache_read_input_tokens
+        } else {
+            0
+        }
+    }
+    
+    pub fn input_tokens(&self) -> u32 {
+        self.entry.message.usage.as_ref()
+            .map(|u| u.input_tokens)
+            .unwrap_or(0)
+    }
+    
+    pub fn output_tokens(&self) -> u32 {
+        self.entry.message.usage.as_ref()
+            .map(|u| u.output_tokens)
+            .unwrap_or(0)
+    }
+    
+    pub fn cache_tokens(&self) -> u32 {
+        self.entry.message.usage.as_ref()
+            .map(|u| u.cache_creation_input_tokens + u.cache_read_input_tokens)
+            .unwrap_or(0)
+    }
+    
+    pub fn has_usage(&self) -> bool {
+        self.entry.message.usage.is_some()
+    }
+}
+
+
 impl FileParser {
-    pub fn new(_cost_mode: CostMode) -> Self {
+    pub fn new() -> Self {
         Self {}
     }
 
@@ -51,17 +121,18 @@ impl FileParser {
                 continue;
             }
             
-            if let Ok(entries) = std::fs::read_dir(&projects_dir) {
-                for entry in entries.flatten() {
-                    let session_dir = entry.path();
-                    if !session_dir.is_dir() {
-                        continue;
-                    }
-                    
-                    let pattern = session_dir.join("*.jsonl");
-                    if let Ok(jsonl_files) = glob(&pattern.to_string_lossy()) {
-                        for jsonl_file in jsonl_files.flatten() {
-                            file_tuples.push((jsonl_file, session_dir.clone()));
+            // Find session directories (format: -base64-encoded-path)
+            // Files can be named either conversation_*.jsonl or *.jsonl (UUID format)
+            let patterns = vec![
+                projects_dir.join("*").join("conversation_*.jsonl"),
+                projects_dir.join("*").join("*.jsonl"),
+            ];
+            
+            for pattern in patterns {
+                if let Ok(paths) = glob(&pattern.to_string_lossy()) {
+                    for entry in paths.flatten() {
+                        if let Some(session_dir) = entry.parent() {
+                            file_tuples.push((entry.clone(), session_dir.to_path_buf()));
                         }
                     }
                 }
@@ -76,31 +147,60 @@ impl FileParser {
             return true;
         }
         
-        // Use file modification time as fast pre-filter
+        // Check file lifespan overlap with search date range
         if let Ok(metadata) = metadata(file_path) {
+            let mut file_start_time = None;
+            let mut file_end_time = None;
+            
+            // Get creation time (birth time) as the start of file lifespan
+            if let Ok(created) = metadata.created() {
+                file_start_time = Some(DateTime::<Utc>::from(created));
+            }
+            
+            // Get modification time as the end of file lifespan
             if let Ok(modified) = metadata.modified() {
-                let file_time = DateTime::<Utc>::from(modified);
+                file_end_time = Some(DateTime::<Utc>::from(modified));
+            }
+            
+            // If we don't have creation time, use modification time as both start and end
+            if file_start_time.is_none() && file_end_time.is_some() {
+                file_start_time = file_end_time;
+            }
+            
+            // Check for overlap between file lifespan and search range
+            if let (Some(file_start), Some(file_end)) = (file_start_time, file_end_time) {
+                // File lifespan: [file_start, file_end]
+                // Search range: [since_date, until_date]
                 
-                // Quick exclusion checks
-                if let Some(since) = since_date {
-                    if file_time < *since {
-                        return false;
-                    }
-                }
+                // For overlap to occur:
+                // 1. File must have been created before or during the search range ends
+                // 2. File must have been modified after or during the search range starts
                 
                 if let Some(until) = until_date {
-                    // Add one day buffer for until date
                     let until_plus_day = *until + chrono::Duration::days(1);
-                    if file_time > until_plus_day {
+                    // File was created after the search range ended
+                    if file_start > until_plus_day {
                         return false;
                     }
                 }
+                
+                if let Some(since) = since_date {
+                    // File was last modified before the search range started
+                    if file_end < *since {
+                        return false;
+                    }
+                }
+                
+                // If we reach here, the file lifespan overlaps with the search range
+                // No need to check file content
+                return true;
             }
         }
         
-        // Parse file content for date range if needed
+        // Fallback: Parse file content for date range if metadata is unavailable
         if let Ok((earliest, latest)) = self.get_file_date_range(file_path) {
             if let (Some(earliest), Some(latest)) = (earliest, latest) {
+                // Check overlap using content timestamps
                 if let Some(since) = since_date {
                     if latest.date_naive() < since.date_naive() {
                         return false;
@@ -121,8 +221,12 @@ impl FileParser {
         let file = File::open(file_path)?;
         let reader = BufReader::new(file);
         
-        let mut earliest_date: Option<DateTime<Utc>> = None;
-        let mut latest_date: Option<DateTime<Utc>> = None;
+        let mut earliest_timestamp: Option<DateTime<Utc>> = None;
+        let mut latest_timestamp: Option<DateTime<Utc>> = None;
+        
+        // Read first and last non-empty lines efficiently
+        let mut first_line = None;
+        let mut last_line = None;
         
         for line in reader.lines() {
             let line = line?;
@@ -131,21 +235,30 @@ impl FileParser {
                 continue;
             }
             
-            if let Ok(data) = serde_json::from_str::<serde_json::Value>(&line) {
-                if let Some(timestamp_str) = data.get("timestamp").and_then(|v| v.as_str()) {
-                    if let Ok(timestamp) = self.parse_timestamp(timestamp_str) {
-                        if earliest_date.is_none() || timestamp < earliest_date.unwrap() {
-                            earliest_date = Some(timestamp);
-                        }
-                        if latest_date.is_none() || timestamp > latest_date.unwrap() {
-                            latest_date = Some(timestamp);
-                        }
-                    }
+            if first_line.is_none() {
+                first_line = Some(line.to_string());
+            }
+            last_line = Some(line.to_string());
+        }
+        
+        // Parse timestamps from first and last entries
+        if let Some(line) = first_line {
+            if let Ok(entry) = serde_json::from_str::<UsageEntry>(&line) {
+                if let Ok(timestamp) = self.parse_timestamp(&entry.timestamp) {
+                    earliest_timestamp = Some(timestamp);
                 }
             }
         }
         
-        Ok((earliest_date, latest_date))
+        if let Some(line) = last_line {
+            if let Ok(entry) = serde_json::from_str::<UsageEntry>(&line) {
+                if let Ok(timestamp) = self.parse_timestamp(&entry.timestamp) {
+                    latest_timestamp = Some(timestamp);
+                }
+            }
+        }
+        
+        Ok((earliest_timestamp, latest_timestamp))
     }
 
     pub fn get_earliest_timestamp(&self, file_path: &Path) -> Result<Option<DateTime<Utc>>> {
@@ -159,11 +272,9 @@ impl FileParser {
                 continue;
             }
             
-            if let Ok(data) = serde_json::from_str::<serde_json::Value>(&line) {
-                if let Some(timestamp_str) = data.get("timestamp").and_then(|v| v.as_str()) {
-                    if let Ok(timestamp) = self.parse_timestamp(timestamp_str) {
-                        return Ok(Some(timestamp));
-                    }
+            if let Ok(entry) = serde_json::from_str::<UsageEntry>(&line) {
+                if let Ok(timestamp) = self.parse_timestamp(&entry.timestamp) {
+                    return Ok(Some(timestamp));
                 }
             }
         }
@@ -189,7 +300,7 @@ impl FileParser {
                 let b_timestamp = self.get_earliest_timestamp(&b.0).unwrap_or(None);
                 
                 match (a_timestamp, b_timestamp) {
-                    (Some(a), Some(b)) => a.cmp(&b),
+                    (Some(a_ts), Some(b_ts)) => a_ts.cmp(&b_ts),
                     (Some(_), None) => std::cmp::Ordering::Less,
                     (None, Some(_)) => std::cmp::Ordering::Greater,
                     (None, None) => std::cmp::Ordering::Equal,
@@ -203,12 +314,19 @@ impl FileParser {
     }
 
     pub fn parse_jsonl_file(&self, file_path: &Path) -> Result<Vec<UsageEntry>> {
+        // Use the default collector processor
+        let processor = CollectorProcessor::new();
+        self.process_jsonl_file(file_path, processor)
+    }
+    
+    // Generic method that accepts any processor
+    pub fn process_jsonl_file<P: JsonlProcessor>(&self, file_path: &Path, mut processor: P) -> Result<P::Output> {
         let file = File::open(file_path)?;
         let reader = BufReader::new(file);
-        
-        let mut entries = Vec::new();
+        let mut line_number = 0;
         
         for line in reader.lines() {
+            line_number += 1;
             let line = line?;
             let line = line.trim();
             if line.is_empty() {
@@ -216,11 +334,11 @@ impl FileParser {
             }
             
             if let Ok(entry) = serde_json::from_str::<UsageEntry>(&line) {
-                entries.push(entry);
+                processor.process_entry(entry, line_number)?;
             }
         }
         
-        Ok(entries)
+        processor.finalize()
     }
 
     pub fn parse_timestamp(&self, timestamp_str: &str) -> Result<DateTime<Utc>> {
@@ -258,88 +376,59 @@ impl FileParser {
     }
 
     pub fn create_unique_hash(&self, entry: &UsageEntry) -> Option<String> {
-        // Match Python behavior: return None if either ID is empty
-        if entry.message.id.is_empty() || entry.request_id.is_empty() {
+        let message_id = &entry.message.id;
+        let request_id = &entry.request_id;
+        
+        if message_id.is_empty() || request_id.is_empty() {
             return None;
         }
-        Some(format!("{}:{}", entry.message.id, entry.request_id))
+        
+        Some(format!("{}:{}", message_id, request_id))
     }
 
-    pub fn load_session_blocks(&self) -> Result<Vec<SessionBlock>> {
-        self.load_session_blocks_with_filter(true)
-    }
-    
-    pub fn load_session_blocks_with_filter(&self, filter_recent: bool) -> Result<Vec<SessionBlock>> {
-        let paths = self.discover_claude_paths()?;
-        let mut blocks = Vec::new();
-        let cutoff_time = if filter_recent {
-            Some(Utc::now() - chrono::Duration::hours(24))
-        } else {
-            None
-        };
+    pub fn find_session_blocks_files(&self, claude_paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
+        let mut block_files = Vec::new();
         
-        for claude_path in paths {
-            let possible_dirs = vec![
-                claude_path.join("usage_tracking"),
-                claude_path.clone(), // Sometimes stored in root
-                claude_path.join("sessions"), // Alternative location
-            ];
+        for claude_path in claude_paths {
+            let usage_dir = claude_path.join("usage_tracking");
+            if !usage_dir.exists() {
+                continue;
+            }
             
-            for usage_dir in possible_dirs {
-                if !usage_dir.exists() {
-                    continue;
-                }
-                
-                // Find session blocks files
-                let patterns = vec![
-                    usage_dir.join("session_blocks_*.json"),
-                    usage_dir.join("*session_blocks*.json"),
-                ];
-                
-                for pattern in patterns {
-                    if let Ok(files) = glob(&pattern.to_string_lossy()) {
-                        for file_path in files.flatten() {
-                            // Filter by file modification time if requested
-                            if let Some(cutoff) = cutoff_time {
-                                if let Ok(metadata) = metadata(&file_path) {
-                                    if let Ok(modified) = metadata.modified() {
-                                        let file_time = DateTime::<Utc>::from(modified);
-                                        if file_time < cutoff {
-                                            continue;
-                                        }
-                                    }
-                                }
-                            }
-                            
-                            if let Ok(file_blocks) = self.parse_session_blocks_file(&file_path) {
-                                // Filter blocks to only recent ones if requested
-                                for block in file_blocks {
-                                    if let Some(cutoff) = cutoff_time {
-                                        if let Ok(start_time) = self.parse_timestamp(&block.start_time) {
-                                            if start_time > cutoff {
-                                                blocks.push(block);
-                                            }
-                                        }
-                                    } else {
-                                        blocks.push(block);
-                                    }
-                                }
-                            }
-                        }
-                    }
+            // Find session block files
+            let pattern = usage_dir.join("session_blocks_*.json");
+            if let Ok(paths) = glob(&pattern.to_string_lossy()) {
+                for entry in paths.flatten() {
+                    block_files.push(entry);
                 }
             }
         }
         
-        Ok(blocks)
+        // Sort by modification time (newest first)
+        block_files.sort_by(|a, b| {
+            let a_mtime = metadata(a).and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
+            let b_mtime = metadata(b).and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
+            b_mtime.cmp(&a_mtime) // Reverse order (newest first)
+        });
+        
+        Ok(block_files)
+    }
+
+    pub fn get_latest_session_blocks(&self, claude_paths: &[PathBuf]) -> Result<Vec<SessionBlock>> {
+        let block_files = self.find_session_blocks_files(claude_paths)?;
+        
+        if let Some(latest_file) = block_files.first() {
+            self.parse_session_blocks_file(latest_file)
+        } else {
+            Ok(Vec::new())
+        }
     }
 
     fn parse_session_blocks_file(&self, file_path: &Path) -> Result<Vec<SessionBlock>> {
-        let file = File::open(file_path)?;
-        let reader = BufReader::new(file);
+        let content = std::fs::read_to_string(file_path)?;
+        let data: serde_json::Value = serde_json::from_str(&content)?;
         
-        let data: serde_json::Value = serde_json::from_reader(reader)?;
-        
+        // Handle both direct array format and wrapped format
         let blocks = if data.is_array() {
             serde_json::from_value::<Vec<SessionBlock>>(data)?
         } else if let Some(blocks) = data.get("blocks") {
@@ -347,9 +436,216 @@ impl FileParser {
         } else if let Some(sessions) = data.get("sessions") {
             serde_json::from_value::<Vec<SessionBlock>>(sessions.clone())?
         } else {
-            Vec::new()
+            // Try to parse the whole object as a single block
+            vec![serde_json::from_value::<SessionBlock>(data)?]
         };
         
         Ok(blocks)
     }
 }
+
+// Default processor that collects all entries into a Vec
+pub struct CollectorProcessor {
+    entries: Vec<UsageEntry>,
+}
+
+impl CollectorProcessor {
+    pub fn new() -> Self {
+        Self { entries: Vec::new() }
+    }
+}
+
+impl JsonlProcessor for CollectorProcessor {
+    type Output = Vec<UsageEntry>;
+    
+    fn process_entry(&mut self, entry: UsageEntry, _line_number: usize) -> Result<()> {
+        self.entries.push(entry);
+        Ok(())
+    }
+    
+    fn finalize(self) -> Result<Self::Output> {
+        Ok(self.entries)
+    }
+}
+
+// Processor that counts entries
+#[allow(dead_code)]
+pub struct CountProcessor {
+    count: usize,
+}
+
+#[allow(dead_code)]
+impl CountProcessor {
+    pub fn new() -> Self {
+        Self { count: 0 }
+    }
+}
+
+#[allow(dead_code)]
+impl JsonlProcessor for CountProcessor {
+    type Output = usize;
+    
+    fn process_entry(&mut self, _entry: UsageEntry, _line_number: usize) -> Result<()> {
+        self.count += 1;
+        Ok(())
+    }
+    
+    fn finalize(self) -> Result<Self::Output> {
+        Ok(self.count)
+    }
+}
+
+// Processor that filters entries based on a predicate
+#[allow(dead_code)]
+pub struct FilterProcessor<F>
+where
+    F: Fn(&UsageEntry) -> bool,
+{
+    predicate: F,
+    entries: Vec<UsageEntry>,
+}
+
+#[allow(dead_code)]
+impl<F> FilterProcessor<F>
+where
+    F: Fn(&UsageEntry) -> bool,
+{
+    pub fn new(predicate: F) -> Self {
+        Self {
+            predicate,
+            entries: Vec::new(),
+        }
+    }
+}
+
+#[allow(dead_code)]
+impl<F> JsonlProcessor for FilterProcessor<F>
+where
+    F: Fn(&UsageEntry) -> bool,
+{
+    type Output = Vec<UsageEntry>;
+    
+    fn process_entry(&mut self, entry: UsageEntry, _line_number: usize) -> Result<()> {
+        if (self.predicate)(&entry) {
+            self.entries.push(entry);
+        }
+        Ok(())
+    }
+    
+    fn finalize(self) -> Result<Self::Output> {
+        Ok(self.entries)
+    }
+}
+
+// Processor that streams entries through a callback
+#[allow(dead_code)]
+pub struct StreamProcessor<F>
+where
+    F: FnMut(UsageEntry, usize) -> Result<()>,
+{
+    callback: F,
+}
+
+#[allow(dead_code)]
+impl<F> StreamProcessor<F>
+where
+    F: FnMut(UsageEntry, usize) -> Result<()>,
+{
+    pub fn new(callback: F) -> Self {
+        Self { callback }
+    }
+}
+
+#[allow(dead_code)]
+impl<F> JsonlProcessor for StreamProcessor<F>
+where
+    F: FnMut(UsageEntry, usize) -> Result<()>,
+{
+    type Output = ();
+    
+    fn process_entry(&mut self, entry: UsageEntry, line_number: usize) -> Result<()> {
+        (self.callback)(entry, line_number)
+    }
+    
+    fn finalize(self) -> Result<Self::Output> {
+        Ok(())
+    }
+}
+
+// Processor that collects ProcessedEntry objects
+#[allow(dead_code)]
+pub struct ProcessedEntryCollector {
+    entries: Vec<ProcessedEntry>,
+    parser: FileParser,
+}
+
+#[allow(dead_code)]
+impl ProcessedEntryCollector {
+    pub fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+            parser: FileParser::new(),
+        }
+    }
+}
+
+#[allow(dead_code)]
+impl JsonlProcessor for ProcessedEntryCollector {
+    type Output = Vec<ProcessedEntry>;
+    
+    fn process_entry(&mut self, entry: UsageEntry, line_number: usize) -> Result<()> {
+        if let Ok(processed) = ProcessedEntry::new(entry, &self.parser, line_number) {
+            self.entries.push(processed);
+        }
+        Ok(())
+    }
+    
+    fn finalize(self) -> Result<Self::Output> {
+        Ok(self.entries)
+    }
+}
+
+// Processor that only processes valid entries (with usage data) through a callback
+#[allow(dead_code)]
+pub struct ValidEntryProcessor<F>
+where
+    F: FnMut(ProcessedEntry) -> Result<()>,
+{
+    callback: F,
+    parser: FileParser,
+}
+
+#[allow(dead_code)]
+impl<F> ValidEntryProcessor<F>
+where
+    F: FnMut(ProcessedEntry) -> Result<()>,
+{
+    pub fn new(callback: F) -> Self {
+        Self {
+            callback,
+            parser: FileParser::new(),
+        }
+    }
+}
+
+#[allow(dead_code)]
+impl<F> JsonlProcessor for ValidEntryProcessor<F>
+where
+    F: FnMut(ProcessedEntry) -> Result<()>,
+{
+    type Output = ();
+    
+    fn process_entry(&mut self, entry: UsageEntry, line_number: usize) -> Result<()> {
+        if entry.message.usage.is_some() {
+            if let Ok(processed) = ProcessedEntry::new(entry, &self.parser, line_number) {
+                (self.callback)(processed)?;
+            }
+        }
+        Ok(())
+    }
+    
+    fn finalize(self) -> Result<Self::Output> {
+        Ok(())
+    }
+}
+

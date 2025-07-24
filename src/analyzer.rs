@@ -13,12 +13,12 @@ pub struct ClaudeUsageAnalyzer {
 }
 
 impl ClaudeUsageAnalyzer {
-    pub fn new(cost_mode: CostMode) -> Self {
+    pub fn new() -> Self {
         Self {
-            parser: FileParser::new(cost_mode.clone()),
-            dedup_engine: DeduplicationEngine::new(cost_mode.clone()),
+            parser: FileParser::new(),
+            dedup_engine: DeduplicationEngine::new(),
             display_manager: DisplayManager::new(),
-            live_monitor: LiveMonitor::new(cost_mode),
+            live_monitor: LiveMonitor::new(),
         }
     }
 
@@ -80,14 +80,8 @@ impl ClaudeUsageAnalyzer {
                 }
                 
                 match command {
-                    "daily" => self.display_manager.display_daily(&data, options.last, options.json_output),
-                    "monthly" => self.display_manager.display_monthly(&data, options.last, options.json_output),
-                    "session" => self.display_manager.display_session(&data, options.last, options.json_output),
-                    "blocks" => {
-                        // Load session blocks for blocks command (without time filtering)
-                        let blocks = self.parser.load_session_blocks_with_filter(false)?;
-                        self.display_manager.display_blocks(&blocks, options.last, options.json_output);
-                    }
+                    "daily" => self.display_manager.display_daily(&data, options.limit, options.json_output),
+                    "monthly" => self.display_manager.display_monthly(&data, options.limit, options.json_output),
                     _ => {
                         anyhow::bail!("Unknown command: {}", command);
                     }
