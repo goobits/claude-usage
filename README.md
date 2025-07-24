@@ -45,6 +45,65 @@ claude-usage live --snapshot       # One-time live snapshot
 claude-usage daily --exclude-vms   # Similar to original ccusage behavior
 ```
 
+## 📸 Example Output
+
+### 🔴 Live Monitoring
+
+```
+$ claude-usage live --snapshot
+
+[ CLAUDE USAGE MONITOR ]
+
+⚡ Tokens:  🟢 ▓▓▓░░░░░░░░░░░░░░░░░ 15% (132,451 / 880,000)
+💲 Budget:  🟡 ▓▓▓▓▓▓▓░░░░░░░░░░░░░ 35% ($458.73 / $1,320.00)
+♻️  Reset:   🕐 ▓▓▓▓░░░░░░░░░░░░░░░░ 18% (5m / 30m)
+
+🔥 453.2 tok/min | 💰 $12.84/hour
+
+🕐 14:32 | 🏁 projects/utils | ♻️  25m
+
+📝 Active session in projects/utils (5m, 1 sessions)
+   Model: claude-3-5-sonnet-20241022
+   ├─ Input: 28,234 tokens ($0.08)
+   ├─ Output: 12,156 tokens ($0.73)
+   ├─ Cache: 92,061 tokens created ($0.35), 1,245,892 read ($1.87)
+   └─ Total Cost: $3.03
+
+[Snapshot mode - aggregated from active sessions across 22 Claude instances]
+```
+
+### 📊 Daily Usage Report
+
+```
+$ claude-usage daily --limit 3
+
+🔍 Discovered 22 Claude instances
+📁 Found 2008 JSONL files across all instances
+📊 Processed 237183 entries, skipped 104857 duplicates
+
+================================================================================
+Claude Code Usage Report - Daily with Project Breakdown (All Instances)
+================================================================================
+
+📊 3 days • 27 sessions • $1450.17 total
+
+📅 2025-07-23 — $524.73 (13 sessions)
+   projects/fractalcode: $1.60 (0%, 1 sessions)
+   projects/palette: $0.76 (0%, 2 sessions)
+   projects/utils: $18.90 (4%, 1 sessions)
+   vms/dev: $143.94 (27%, 3 sessions)
+   vms/goobits: $85.97 (16%, 2 sessions)
+   vms/promptkeeper: $139.28 (27%, 0 sessions)
+   ... and more
+
+📅 2025-07-22 — $455.43 (7 sessions)
+   projects/goobits: $28.57 (6%, 1 sessions)
+   projects/utils: $31.05 (7%, 1 sessions)
+   vms/goobits: $116.41 (26%, 1 sessions)
+   vms/vm: $77.59 (17%, 0 sessions)
+   ... and more
+```
+
 ## 📊 Analysis Commands
 
 ```bash
@@ -58,6 +117,8 @@ claude-usage monthly --limit 3    # Last 3 months
 ```
 
 ## 🔴 Live Monitoring
+
+Real-time monitoring dashboard that tracks active Claude sessions:
 
 ```bash
 # Real-time monitoring dashboard
