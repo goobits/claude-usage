@@ -24,10 +24,10 @@ impl ClaudeUsageAnalyzer {
 
     pub async fn aggregate_data(&self, _command: &str, options: ProcessOptions) -> Result<Vec<SessionOutput>> {
         // Discover Claude paths
-        let paths = self.parser.discover_claude_paths()?;
+        let paths = self.parser.discover_claude_paths(options.exclude_vms)?;
         
         if !options.json_output {
-            println!("🔍 Discovered {} Claude instances", paths.len());
+            println!("🔍 Discovered {} Claude instance{}", paths.len(), if paths.len() == 1 { "" } else { "s" });
         }
         
         // Find all JSONL files
@@ -65,7 +65,7 @@ impl ClaudeUsageAnalyzer {
     pub async fn run_command(&mut self, command: &str, options: ProcessOptions) -> Result<()> {
         match command {
             "live" => {
-                self.live_monitor.run_live_monitor(options.json_output, options.snapshot).await
+                self.live_monitor.run_live_monitor(options.json_output, options.snapshot, options.exclude_vms).await
             }
             _ => {
                 let data = self.aggregate_data(command, options.clone()).await?;

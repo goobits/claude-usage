@@ -39,6 +39,9 @@ enum Commands {
         /// End date filter (YYYY-MM-DD)
         #[arg(long)]
         until: Option<String>,
+        /// Exclude VMs directory from analysis
+        #[arg(long)]
+        exclude_vms: bool,
     },
     /// Show monthly usage aggregation
     Monthly {
@@ -54,6 +57,9 @@ enum Commands {
         /// End date filter (YYYY-MM-DD)
         #[arg(long)]
         until: Option<String>,
+        /// Exclude VMs directory from analysis
+        #[arg(long)]
+        exclude_vms: bool,
     },
     /// Show live monitoring
     Live {
@@ -63,6 +69,9 @@ enum Commands {
         /// Show live data snapshot (single view, no monitoring loop)
         #[arg(long)]
         snapshot: bool,
+        /// Exclude VMs directory from analysis
+        #[arg(long)]
+        exclude_vms: bool,
     },
 }
 
@@ -77,26 +86,27 @@ async fn main() -> Result<()> {
         limit: None,
         since: None,
         until: None,
+        exclude_vms: false,
     }) {
-        Commands::Daily { json, limit, since, until } => {
+        Commands::Daily { json, limit, since, until, exclude_vms } => {
             let (_since_date, _until_date, mut analyzer, options) = 
-                parse_common_args(json, limit, since, until, "daily");
+                parse_common_args(json, limit, since, until, "daily", exclude_vms);
             
             match analyzer.run_command("daily", options).await {
                 Ok(_) => Ok(()),
                 Err(e) => handle_error(e, json),
             }
         }
-        Commands::Monthly { json, limit, since, until } => {
+        Commands::Monthly { json, limit, since, until, exclude_vms } => {
             let (_since_date, _until_date, mut analyzer, options) = 
-                parse_common_args(json, limit, since, until, "monthly");
+                parse_common_args(json, limit, since, until, "monthly", exclude_vms);
             
             match analyzer.run_command("monthly", options).await {
                 Ok(_) => Ok(()),
                 Err(e) => handle_error(e, json),
             }
         }
-        Commands::Live { json, snapshot } => {
+        Commands::Live { json, snapshot, exclude_vms } => {
             if json && !snapshot {
                 eprintln!("Error: Live monitoring does not support --json output");
                 process::exit(1);
@@ -110,6 +120,7 @@ async fn main() -> Result<()> {
                 since_date: None,
                 until_date: None,
                 snapshot,
+                exclude_vms,
             };
             
             match analyzer.run_command("live", options).await {
@@ -126,6 +137,7 @@ fn parse_common_args(
     since: Option<String>,
     until: Option<String>,
     command: &str,
+    exclude_vms: bool,
 ) -> (Option<chrono::DateTime<chrono::Utc>>, Option<chrono::DateTime<chrono::Utc>>, ClaudeUsageAnalyzer, ProcessOptions) {
     // Parse date filters
     let since_date = if let Some(since_str) = since {
@@ -167,6 +179,7 @@ fn parse_common_args(
         since_date,
         until_date,
         snapshot: false,
+        exclude_vms,
     };
     
     (since_date, until_date, analyzer, options)

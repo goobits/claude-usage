@@ -285,4 +285,5 @@ pub struct ProcessOptions {
     pub since_date: Option<DateTime<Utc>>,
     pub until_date: Option<DateTime<Utc>>,
     pub snapshot: bool,
+    pub exclude_vms: bool,
 }

@@ -21,13 +21,16 @@ impl LiveMonitor {
         }
     }
 
-    pub async fn run_live_monitor(&mut self, json_output: bool, snapshot: bool) -> Result<()> {
+    pub async fn run_live_monitor(&mut self, json_output: bool, snapshot: bool, exclude_vms: bool) -> Result<()> {
         const TOKEN_LIMIT: u32 = 880000; // Max20 limit
         const BUDGET_LIMIT: f64 = TOKEN_LIMIT as f64 * 0.0015; // ~$1.50 per 1000 tokens
         
+        // Store exclude_vms for use in other methods
+        self.parser = FileParser::new(); // We'll pass exclude_vms to discover_claude_paths directly
+        
         if json_output || snapshot {
             // Snapshot mode for JSON or when --snapshot is used
-            self.display_snapshot(TOKEN_LIMIT, BUDGET_LIMIT, json_output).await?;
+            self.display_snapshot(TOKEN_LIMIT, BUDGET_LIMIT, json_output, exclude_vms).await?;
             return Ok(());
         }
         
@@ -49,7 +52,7 @@ impl LiveMonitor {
                     break;
                 }
                 _ = interval.tick() => {
-                    self.display_live_data(TOKEN_LIMIT, BUDGET_LIMIT).await?;
+                    self.display_live_data(TOKEN_LIMIT, BUDGET_LIMIT, exclude_vms).await?;
                 }
             }
         }
@@ -57,10 +60,10 @@ impl LiveMonitor {
         Ok(())
     }
 
-    async fn display_live_data(&mut self, token_limit: u32, budget_limit: f64) -> Result<()> {
+    async fn display_live_data(&mut self, token_limit: u32, budget_limit: f64, exclude_vms: bool) -> Result<()> {
         self.clear_screen();
         
-        let active_block = self.find_active_session_block().await?;
+        let active_block = self.find_active_session_block(exclude_vms).await?;
         let current_time = chrono::Local::now().format("%H:%M").to_string();
         
         // Print header
@@ -68,16 +71,16 @@ impl LiveMonitor {
         println!();
         
         if let Some(block) = active_block {
-            self.display_active_session(&block, token_limit, budget_limit, &current_time).await?;
+            self.display_active_session(&block, token_limit, budget_limit, &current_time, exclude_vms).await?;
         } else {
-            self.display_inactive_session(token_limit, budget_limit, &current_time).await?;
+            self.display_inactive_session(token_limit, budget_limit, &current_time, exclude_vms).await?;
         }
         
         Ok(())
     }
 
-    async fn display_snapshot(&mut self, token_limit: u32, budget_limit: f64, json_output: bool) -> Result<()> {
-        let active_block = self.find_active_session_block().await?;
+    async fn display_snapshot(&mut self, token_limit: u32, budget_limit: f64, json_output: bool, exclude_vms: bool) -> Result<()> {
+        let active_block = self.find_active_session_block(exclude_vms).await?;
         let current_time = chrono::Local::now().format("%H:%M").to_string();
         
         if json_output {
@@ -96,20 +99,20 @@ impl LiveMonitor {
             println!();
             
             if let Some(block) = active_block {
-                self.display_active_session(&block, token_limit, budget_limit, &current_time).await?;
+                self.display_active_session(&block, token_limit, budget_limit, &current_time, exclude_vms).await?;
                 println!("\n[Snapshot mode - aggregated from active sessions across {} Claude instances]", 
-                         self.parser.discover_claude_paths()?.len());
+                         self.parser.discover_claude_paths(exclude_vms)?.len());
             } else {
-                self.display_inactive_session(token_limit, budget_limit, &current_time).await?;
+                self.display_inactive_session(token_limit, budget_limit, &current_time, exclude_vms).await?;
                 println!("\n[Snapshot mode - scanned {} Claude instances]", 
-                         self.parser.discover_claude_paths()?.len());
+                         self.parser.discover_claude_paths(exclude_vms)?.len());
             }
         }
         
         Ok(())
     }
 
-    async fn display_active_session(&self, block: &SessionBlock, token_limit: u32, budget_limit: f64, current_time: &str) -> Result<()> {
+    async fn display_active_session(&self, block: &SessionBlock, token_limit: u32, budget_limit: f64, current_time: &str, exclude_vms: bool) -> Result<()> {
         let start_time = self.parser.parse_timestamp(&block.start_time)?;
         let end_time = self.parser.parse_timestamp(&block.end_time)?;
         let now = Utc::now();
@@ -207,7 +210,7 @@ impl LiveMonitor {
         Ok(())
     }
 
-    async fn display_inactive_session(&self, token_limit: u32, budget_limit: f64, current_time: &str) -> Result<()> {
+    async fn display_inactive_session(&self, token_limit: u32, budget_limit: f64, current_time: &str, exclude_vms: bool) -> Result<()> {
         println!("⚡ Tokens:  {} 0 / {}", 
                  self.create_progress_bar(0.0, 20, "🟢"), token_limit);
         println!("💲 Budget:  {} $0.00 / ${:.2}", 
@@ -271,7 +274,7 @@ impl LiveMonitor {
         }))
     }
 
-    async fn find_active_session_block(&mut self) -> Result<Option<SessionBlock>> {
+    async fn find_active_session_block(&mut self, exclude_vms: bool) -> Result<Option<SessionBlock>> {
         let current_time = std::time::Instant::now();
         
         // Use cache if available and recent (30 seconds)
@@ -290,7 +293,7 @@ impl LiveMonitor {
         }
         
         // Load fresh session blocks
-        let claude_paths = self.parser.discover_claude_paths()?;
+        let claude_paths = self.parser.discover_claude_paths(exclude_vms)?;
         let blocks = self.parser.get_latest_session_blocks(&claude_paths)?;
         let now = Utc::now();
         

@@ -84,7 +84,7 @@ impl FileParser {
         Self {}
     }
 
-    pub fn discover_claude_paths(&self) -> Result<Vec<PathBuf>> {
+    pub fn discover_claude_paths(&self, exclude_vms: bool) -> Result<Vec<PathBuf>> {
         let mut paths = Vec::new();
         
         // Get home directory
@@ -96,14 +96,16 @@ impl FileParser {
             paths.push(main_path.clone());
         }
         
-        // VM paths
-        let vms_dir = main_path.join("vms");
-        if vms_dir.exists() {
-            if let Ok(entries) = std::fs::read_dir(&vms_dir) {
-                for entry in entries.flatten() {
-                    let vm_path = entry.path();
-                    if vm_path.is_dir() && vm_path.join("projects").exists() {
-                        paths.push(vm_path);
+        // VM paths (only if not excluded)
+        if !exclude_vms {
+            let vms_dir = main_path.join("vms");
+            if vms_dir.exists() {
+                if let Ok(entries) = std::fs::read_dir(&vms_dir) {
+                    for entry in entries.flatten() {
+                        let vm_path = entry.path();
+                        if vm_path.is_dir() && vm_path.join("projects").exists() {
+                            paths.push(vm_path);
+                        }
                     }
                 }
             }

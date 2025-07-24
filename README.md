@@ -1,6 +1,10 @@
 # 📊 Goobits Claude Usage
 
-A high-performance Rust implementation for comprehensive Claude usage analysis across multiple VMs and instances. Track token consumption, costs, and activity with real-time monitoring capabilities. Complete rewrite of the original Node.js-based [ccusage](https://github.com/ryoppippi/ccusage) with 3-10x performance improvements.
+A high-performance Rust implementation for comprehensive Claude usage analysis across multiple VMs and instances. Track token consumption, costs, and activity with real-time monitoring capabilities. 
+
+This tool was created for two primary reasons:
+1. **Super-fast Rust-based analysis** - High-performance token usage tracking with 3-10x better performance than TypeScript alternatives
+2. **Multi-VM support** - Native integration with [Goobits VM](https://github.com/goobits/vm) infrastructure to track Claude usage across multiple virtual machines and instances
 
 ## 📋 Table of Contents
 
@@ -32,10 +36,13 @@ claude-usage daily                # Test basic functionality
 ## 🎯 Basic Usage
 
 ```bash
-claude-usage daily                 # Daily usage with project breakdown
+claude-usage daily                 # Daily usage with project breakdown (includes VMs)
 claude-usage monthly               # Monthly aggregation
 claude-usage live                  # Real-time monitoring
 claude-usage live --snapshot       # One-time live snapshot
+
+# Exclude VMs directory (only analyze main Claude instance)
+claude-usage daily --exclude-vms   # Similar to original ccusage behavior
 ```
 
 ## 📊 Analysis Commands
@@ -98,10 +105,13 @@ claude-usage daily --json | jq '[.daily[].totalCost] | add'
 The tool automatically discovers and analyzes Claude Code usage data from:
 
 - **Main Instance**: `~/.claude/projects/*/conversation_*.jsonl`
-- **VM Instances**: `~/.claude/vms/*/projects/*/conversation_*.jsonl`
+- **VM Instances**: `~/.claude/vms/*/projects/*/conversation_*.jsonl` (when using [Goobits VM](https://github.com/goobits/vm))
 - **Session Blocks**: `~/.claude/usage_tracking/session_blocks_*.json` (used by live monitor)
 
-**Global Deduplication**: Prevents double-counting when the same conversation appears across multiple VMs using messageId:requestId hashing.
+**Key Features**:
+- **Multi-VM Support**: Seamlessly aggregates usage across all VMs managed by Goobits VM infrastructure
+- **Global Deduplication**: Prevents double-counting when the same conversation appears across multiple VMs using messageId:requestId hashing
+- **Flexible Scope**: Use `--exclude-vms` flag to analyze only the main Claude instance
 
 ## 🚀 Performance Features
 
