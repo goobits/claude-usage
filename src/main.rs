@@ -1,10 +1,12 @@
 use clap::{Parser, Subcommand};
 use chrono;
-use anyhow::Result;
-use std::process;
+use anyhow::{Result, Context};
 
 mod models;
 mod parser;
+mod file_discovery;
+mod timestamp_parser;
+mod session_utils;
 mod dedup;
 mod analyzer;
 mod display;
@@ -90,7 +92,7 @@ async fn main() -> Result<()> {
     }) {
         Commands::Daily { json, limit, since, until, exclude_vms } => {
             let (_since_date, _until_date, mut analyzer, options) = 
-                parse_common_args(json, limit, since, until, "daily", exclude_vms);
+                parse_common_args(json, limit, since, until, "daily", exclude_vms)?;
             
             match analyzer.run_command("daily", options).await {
                 Ok(_) => Ok(()),
@@ -99,7 +101,7 @@ async fn main() -> Result<()> {
         }
         Commands::Monthly { json, limit, since, until, exclude_vms } => {
             let (_since_date, _until_date, mut analyzer, options) = 
-                parse_common_args(json, limit, since, until, "monthly", exclude_vms);
+                parse_common_args(json, limit, since, until, "monthly", exclude_vms)?;
             
             match analyzer.run_command("monthly", options).await {
                 Ok(_) => Ok(()),
@@ -108,8 +110,7 @@ async fn main() -> Result<()> {
         }
         Commands::Live { json, snapshot, exclude_vms } => {
             if json && !snapshot {
-                eprintln!("Error: Live monitoring does not support --json output");
-                process::exit(1);
+                return Err(anyhow::anyhow!("Live monitoring does not support --json output"));
             }
             
             let mut analyzer = ClaudeUsageAnalyzer::new();
@@ -138,16 +139,15 @@ fn parse_common_args(
     until: Option<String>,
     command: &str,
     exclude_vms: bool,
-) -> (Option<chrono::DateTime<chrono::Utc>>, Option<chrono::DateTime<chrono::Utc>>, ClaudeUsageAnalyzer, ProcessOptions) {
+) -> Result<(Option<chrono::DateTime<chrono::Utc>>, Option<chrono::DateTime<chrono::Utc>>, ClaudeUsageAnalyzer, ProcessOptions)> {
     // Parse date filters
     let since_date = if let Some(since_str) = since {
         match chrono::NaiveDate::parse_from_str(&since_str, "%Y-%m-%d") {
-            Ok(date) => Some(date.and_hms_opt(0, 0, 0).unwrap().and_utc()),
+            Ok(date) => Some(date.and_hms_opt(0, 0, 0)
+                .context("Failed to create time from date")?.
+                and_utc()),
             Err(_) => {
-                if !json {
-                    eprintln!("❌ Invalid since date format: {}. Use YYYY-MM-DD", since_str);
-                }
-                process::exit(1);
+                return Err(anyhow::anyhow!("Invalid since date format: {}. Use YYYY-MM-DD", since_str));
             }
         }
     } else {
@@ -156,12 +156,11 @@ fn parse_common_args(
     
     let until_date = if let Some(until_str) = until {
         match chrono::NaiveDate::parse_from_str(&until_str, "%Y-%m-%d") {
-            Ok(date) => Some(date.and_hms_opt(23, 59, 59).unwrap().and_utc()),
+            Ok(date) => Some(date.and_hms_opt(23, 59, 59)
+                .context("Failed to create time from date")?.
+                and_utc()),
             Err(_) => {
-                if !json {
-                    eprintln!("❌ Invalid until date format: {}. Use YYYY-MM-DD", until_str);
-                }
-                process::exit(1);
+                return Err(anyhow::anyhow!("Invalid until date format: {}. Use YYYY-MM-DD", until_str));
             }
         }
     } else {
@@ -182,7 +181,7 @@ fn parse_common_args(
         exclude_vms,
     };
     
-    (since_date, until_date, analyzer, options)
+    Ok((since_date, until_date, analyzer, options))
 }
 
 fn handle_error(e: anyhow::Error, json: bool) -> Result<(), anyhow::Error> {
@@ -191,5 +190,5 @@ fn handle_error(e: anyhow::Error, json: bool) -> Result<(), anyhow::Error> {
     } else {
         eprintln!("Error: {}", e);
     }
-    process::exit(1);
+    Err(e)
 }

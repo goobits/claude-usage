@@ -13,7 +13,7 @@ fn main() -> Result<()> {
     
     // Example 1: Count entries in a file
     println!("=== Example 1: Counting entries ===");
-    if let Ok(paths) = parser.discover_claude_paths() {
+    if let Ok(paths) = parser.discover_claude_paths(false) {
         if let Ok(files) = parser.find_jsonl_files(&paths) {
             if let Some((file_path, _)) = files.first() {
                 let count = parser.process_jsonl_file(file_path, CountProcessor::new())?;

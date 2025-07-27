@@ -12,7 +12,8 @@ impl PricingManager {
     pub async fn get_pricing_data() -> Result<HashMap<String, PricingData>> {
         // Check cache first
         {
-            let cache = PRICING_CACHE.lock().unwrap();
+            let cache = PRICING_CACHE.lock()
+                .expect("Failed to acquire pricing cache lock for reading");
             if let Some(ref pricing) = *cache {
                 return Ok(pricing.clone());
             }
@@ -23,7 +24,8 @@ impl PricingManager {
         
         // Cache the result
         {
-            let mut cache = PRICING_CACHE.lock().unwrap();
+            let mut cache = PRICING_CACHE.lock()
+                .expect("Failed to acquire pricing cache lock for writing");
             *cache = Some(pricing.clone());
         }
         

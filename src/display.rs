@@ -1,7 +1,7 @@
 use crate::models::*;
 use std::collections::{HashMap, HashSet};
 use serde_json;
-use colored::*;
+use colored::Colorize;
 
 pub struct DisplayManager;
 

@@ -112,7 +112,7 @@ impl LiveMonitor {
         Ok(())
     }
 
-    async fn display_active_session(&self, block: &SessionBlock, token_limit: u32, budget_limit: f64, current_time: &str, exclude_vms: bool) -> Result<()> {
+    async fn display_active_session(&self, block: &SessionBlock, token_limit: u32, budget_limit: f64, current_time: &str, _exclude_vms: bool) -> Result<()> {
         let start_time = self.parser.parse_timestamp(&block.start_time)?;
         let end_time = self.parser.parse_timestamp(&block.end_time)?;
         let now = Utc::now();
@@ -210,7 +210,7 @@ impl LiveMonitor {
         Ok(())
     }
 
-    async fn display_inactive_session(&self, token_limit: u32, budget_limit: f64, current_time: &str, exclude_vms: bool) -> Result<()> {
+    async fn display_inactive_session(&self, token_limit: u32, budget_limit: f64, current_time: &str, _exclude_vms: bool) -> Result<()> {
         println!("⚡ Tokens:  {} 0 / {}", 
                  self.create_progress_bar(0.0, 20, "🟢"), token_limit);
         println!("💲 Budget:  {} $0.00 / ${:.2}", 
@@ -350,17 +350,17 @@ impl LiveMonitor {
 
     fn clear_screen(&self) {
         print!("\x1b[2J\x1b[H");
-        io::stdout().flush().unwrap();
+        io::stdout().flush().expect("Failed to flush stdout for screen clear");
     }
 
     fn hide_cursor(&self) {
         print!("\x1b[?25l");
-        io::stdout().flush().unwrap();
+        io::stdout().flush().expect("Failed to flush stdout for cursor hide");
     }
 
     fn show_cursor(&self) {
         print!("\x1b[?25h");
-        io::stdout().flush().unwrap();
+        io::stdout().flush().expect("Failed to flush stdout for cursor show");
     }
 
 }

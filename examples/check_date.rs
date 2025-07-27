@@ -51,7 +51,7 @@ fn main() -> Result<()> {
     let parser = FileParser::new();
     
     // Discover all Claude instances
-    let claude_paths = parser.discover_claude_paths()?;
+    let claude_paths = parser.discover_claude_paths(false)?;
     println!("Found {} Claude instances", claude_paths.len());
     
     // Find all JSONL files

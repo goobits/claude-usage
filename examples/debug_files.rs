@@ -10,7 +10,7 @@ fn main() -> Result<()> {
     println!("🔍 Debugging file discovery...\n");
     
     // Step 1: Discover Claude paths
-    let claude_paths = parser.discover_claude_paths()?;
+    let claude_paths = parser.discover_claude_paths(false)?;
     println!("Claude instances found: {}", claude_paths.len());
     for (i, path) in claude_paths.iter().enumerate() {
         println!("  {}: {}", i + 1, path.display());
