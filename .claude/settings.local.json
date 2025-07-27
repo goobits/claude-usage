@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(claude-usage --help)",
+      "Bash(claude-usage:*)",
+      "Bash(cargo build:*)",
+      "Bash(cargo install:*)"
+    ],
+    "deny": []
+  }
+}
