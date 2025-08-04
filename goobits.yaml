@@ -1,0 +1,177 @@
+# Goobits configuration for claude-usage Rust CLI
+package_name: claude-usage
+command_name: claude-usage
+display_name: "Claude Usage Analytics"
+description: "Fast Rust implementation for Claude usage analysis across multiple VMs"
+
+# Specify Rust as the target language
+language: rust
+
+# Python configuration (still required by current schema)
+python:
+  minimum_version: "3.8"
+  maximum_version: "3.13"
+
+# Dependencies (Python field required, but we'll use Rust dependencies in the CLI section)
+dependencies:
+  required: []
+  optional: []
+
+installation:
+  pypi_name: claude-usage
+  development_path: "."
+  extras:
+    python: []
+    apt: ["build-essential", "pkg-config", "libssl-dev"]
+
+shell_integration:
+  enabled: true
+  alias: cusage
+
+validation:
+  check_api_keys: false
+  check_disk_space: true
+  minimum_disk_space_mb: 100
+
+messages:
+  install_success: |
+    🎉 Claude Usage Analytics has been installed successfully!
+    
+    Get started with:
+      cusage daily       # Show daily usage breakdown
+      cusage monthly     # Show monthly aggregation
+      cusage live        # Monitor usage in real-time
+    
+    Run 'cusage --help' for more information.
+  
+  install_dev_success: |
+    🚀 Claude Usage Analytics installed in development mode!
+    ✅ Your changes will be reflected after recompiling.
+    
+    Development workflow:
+      - Edit src/*.rs files
+      - cargo build --release
+      - Test with: cargo run -- daily --limit 1
+
+cli:
+  name: "Claude Usage"
+  version: "1.0.0"
+  display_version: true
+  tagline: "Fast Rust implementation for Claude usage analysis across multiple VMs"
+  description: "Analyze Claude AI usage across multiple VMs with detailed breakdowns by project, session, and time period."
+  icon: "📊"
+  enable_recursive_help: true
+  
+  commands:
+    daily:
+      desc: "Show daily usage with project breakdown"
+      help: |
+        Display daily usage statistics with detailed project breakdowns.
+        Shows token counts, costs, and session information aggregated by day.
+      
+      options:
+        - name: json
+          long: json
+          desc: "Output in JSON format"
+          type: bool
+          default: false
+          
+        - name: limit
+          long: limit
+          desc: "Show last N entries"
+          type: int
+          required: false
+        
+        - name: since
+          long: since
+          desc: "Start date filter (YYYY-MM-DD)"
+          type: str
+          required: false
+        
+        - name: until
+          long: until
+          desc: "End date filter (YYYY-MM-DD)"
+          type: str
+          required: false
+          
+        - name: exclude_vms
+          long: exclude-vms
+          desc: "Exclude VMs directory from analysis"
+          type: bool
+          default: false
+    
+    monthly:
+      desc: "Show monthly usage aggregation"
+      help: |
+        Display monthly usage statistics with aggregated totals.
+        Shows token counts, costs, and session information grouped by month.
+      
+      options:
+        - name: json
+          long: json
+          desc: "Output in JSON format"
+          type: bool
+          default: false
+          
+        - name: limit
+          long: limit
+          desc: "Show last N entries"
+          type: int
+          required: false
+        
+        - name: since
+          long: since
+          desc: "Start date filter (YYYY-MM-DD)"
+          type: str
+          required: false
+        
+        - name: until
+          long: until
+          desc: "End date filter (YYYY-MM-DD)"
+          type: str
+          required: false
+          
+        - name: exclude_vms
+          long: exclude-vms
+          desc: "Exclude VMs directory from analysis"
+          type: bool
+          default: false
+    
+    live:
+      desc: "Show live monitoring"
+      help: |
+        Monitor Claude usage in real-time with live updates.
+        Shows current session activity, token burn rate, and budget tracking.
+      
+      options:
+        - name: json
+          long: json
+          desc: "Output in JSON format (only with --snapshot)"
+          type: bool
+          default: false
+          
+        - name: snapshot
+          long: snapshot
+          desc: "Show live data snapshot (single view, no monitoring loop)"
+          type: bool
+          default: false
+          
+        - name: exclude_vms
+          long: exclude-vms
+          desc: "Exclude VMs directory from analysis"
+          type: bool
+          default: false
+
+# Rust-specific configuration (for future use when schema supports it)
+# rust:
+#   edition: "2021"
+#   dependencies:
+#     clap: { version: "4.5", features: ["derive", "color", "suggestions"] }
+#     tokio: { version: "1.40", features: ["full"] }
+#     chrono: "0.4"
+#     serde: { version: "1.0", features: ["derive"] }
+#     serde_json: "1.0"
+#     anyhow: "1.0"
+#     colored: "2.2"
+#     indicatif: "0.17"
+#     reqwest: { version: "0.11", features: ["json"] }
