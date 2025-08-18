@@ -1,8 +1,9 @@
 use anyhow::Result;
 use std::fs::File;
-use std::io::Read;
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 use crate::models::*;
+use crate::keeper_integration::KeeperIntegration;
 
 /// Handles session-related utilities including session ID extraction and session blocks parsing
 pub struct SessionUtils;
@@ -37,25 +38,19 @@ impl SessionUtils {
     }
 
     /// Parse a session blocks file and return the session blocks
-    pub fn parse_session_blocks_file(file_path: &Path) -> Result<Vec<SessionBlock>> {
+    pub fn parse_session_blocks_file(file_path: &Path, keeper: &KeeperIntegration) -> Result<Vec<SessionBlock>> {
+        
+        let file = File::open(file_path)?;
+        let reader = BufReader::new(file);
+        
+        // For JSON files, we need to accumulate lines
         let mut content = String::new();
-        File::open(file_path)?.read_to_string(&mut content)?;
+        for line in reader.lines() {
+            content.push_str(&line?);
+            content.push('\n');
+        }
         
-        let data: serde_json::Value = serde_json::from_str(&content)?;
-        
-        // Handle both direct array format and wrapped format
-        let blocks = if data.is_array() {
-            serde_json::from_value::<Vec<SessionBlock>>(data)?
-        } else if let Some(blocks) = data.get("blocks") {
-            serde_json::from_value::<Vec<SessionBlock>>(blocks.clone())?
-        } else if let Some(sessions) = data.get("sessions") {
-            serde_json::from_value::<Vec<SessionBlock>>(sessions.clone())?
-        } else {
-            // Try to parse the whole object as a single block
-            vec![serde_json::from_value::<SessionBlock>(data)?]
-        };
-        
-        Ok(blocks)
+        keeper.parse_session_blocks(&content)
     }
 }
 

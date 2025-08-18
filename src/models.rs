@@ -1,3 +1,49 @@
+//! Core Data Models
+//!
+//! This module defines the primary data structures used throughout the Claude usage analysis
+//! system. These models represent the complete data pipeline from raw usage entries to
+//! aggregated reports.
+//!
+//! ## Data Flow
+//!
+//! The data flows through these models in the following sequence:
+//!
+//! 1. **Raw Data**: [`UsageEntry`] - Individual entries parsed from JSONL files
+//! 2. **Aggregation**: [`SessionData`] - Usage data grouped by session and project
+//! 3. **Output**: [`SessionOutput`] - Serializable format for reports and JSON output
+//! 4. **Reports**: [`DailyData`], [`MonthlyData`] - Time-based aggregated views
+//!
+//! ## Core Types
+//!
+//! ### Usage Entry Structure
+//! - [`UsageEntry`] - Top-level wrapper for a single usage record
+//! - [`MessageData`] - Information about the specific Claude message/interaction
+//! - [`UsageData`] - Token consumption details (input, output, cache operations)
+//!
+//! ### Session Management
+//! - [`SessionData`] - Internal session tracking with daily breakdowns
+//! - [`SessionOutput`] - External-facing session summary for reports
+//! - [`DailyUsage`] - Per-day usage summary within a session
+//!
+//! ### Report Generation
+//! - [`DailyData`] - Daily usage report with project breakdown
+//! - [`DailyProject`] - Project-specific usage within a day
+//! - [`MonthlyData`] - Monthly usage summary
+//!
+//! ### Session Blocks
+//! - [`SessionBlock`] - Time-bounded session information from Claude's session tracking
+//! - [`TokenCounts`] - Structured token usage counts for session blocks
+//!
+//! ### Pricing Data
+//! - [`PricingData`] - Cost per token for different token types and models
+//!
+//! ## Features
+//!
+//! - **Serde Integration**: All public types support serialization/deserialization
+//! - **Optional Fields**: Handles missing data gracefully (e.g., cost information)
+//! - **Token Calculation**: Automatic total token computation
+//! - **Type Safety**: Strong typing prevents common data manipulation errors
+
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, HashMap};
 

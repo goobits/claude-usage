@@ -1,0 +1,33 @@
+# Docker Container Configuration for Claude Usage
+# Optimized for containerized environments
+
+[logging]
+level = "INFO"
+format = "json"          # JSON for log aggregation
+output = "console"       # Console only in containers
+
+[processing]
+batch_size = 20          # Medium batch size
+parallel_chunks = 4      # Conservative thread count
+max_retries = 3
+progress_interval_mb = 20
+
+[memory]
+max_memory_mb = 512      # Conservative memory limit
+buffer_size_kb = 8
+warning_threshold_pct = 85
+
+[dedup]
+window_hours = 24
+cleanup_threshold = 10000
+enabled = true
+
+[output]
+json_pretty = false      # Compact output
+include_metadata = false
+timestamp_format = "%Y-%m-%d %H:%M:%S"
+
+[paths]
+claude_home = "/app/claude"
+vms_directory = "/app/claude/vms"
+log_directory = "/app/logs"

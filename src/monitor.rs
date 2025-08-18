@@ -1,3 +1,126 @@
+//! Real-time Session Monitoring
+//!
+//! This module provides real-time monitoring capabilities for active Claude Code sessions.
+//! It displays live usage statistics, token consumption, cost tracking, and session progress
+//! with an interactive terminal interface.
+//!
+//! ## Core Functionality
+//!
+//! ### Live Monitoring Features
+//! - **Real-time Updates**: Refreshes every 3 seconds with current session data
+//! - **Token Tracking**: Shows current token usage against configurable limits
+//! - **Cost Monitoring**: Displays session costs with budget tracking
+//! - **Progress Visualization**: ASCII progress bars for tokens, budget, and time
+//! - **Burn Rate Analysis**: Calculates token and cost consumption rates
+//! - **Session Detection**: Automatically finds and tracks active sessions
+//!
+//! ### Display Modes
+//! - **Live Mode**: Continuous monitoring with terminal updates
+//! - **Snapshot Mode**: Single-point-in-time report
+//! - **JSON Output**: Machine-readable session status for automation
+//! - **Terminal Interface**: Color-coded visual display with progress indicators
+//!
+//! ## Key Types
+//!
+//! - [`LiveMonitor`] - Main monitoring interface with caching and display logic
+//!
+//! ## Monitoring Display
+//!
+//! ### Visual Elements
+//! The monitor displays several key metrics:
+//!
+//! ```text
+//! [ CLAUDE USAGE MONITOR ]
+//!
+//! ⚡ Tokens:  🟢 ████████████░░░░░░░░ 65000 / 880000
+//! 💲 Budget:  🟢 ███████░░░░░░░░░░░░░ $3.25 / $15.00
+//! ♻️  Reset:   🟡 ██████████████░░░░░░ 2h 15m
+//!
+//! 🔥 125.5 tok/min | 💰 $2.40/hour
+//!
+//! 🕐 14:23 | 🏁 16:45 | ♻️  18:00
+//!
+//! ⛵ Smooth sailing...
+//! ```
+//!
+//! ### Status Indicators
+//! - 🟢 Green: Usage below 70% of limit
+//! - 🟡 Yellow: Usage between 70-90% of limit  
+//! - 🔴 Red: Usage above 90% of limit
+//! - 📝 No active session when idle
+//!
+//! ### Metrics Tracked
+//! - **Token Usage**: Current tokens vs. 880K limit (Claude Code's Max20 limit)
+//! - **Budget Tracking**: Estimated costs vs. budget (~$1.50 per 1000 tokens)
+//! - **Session Progress**: Time elapsed vs. session reset time
+//! - **Burn Rates**: Tokens per minute and dollars per hour
+//! - **Time Predictions**: Estimated depletion time and session reset
+//!
+//! ## Configuration
+//!
+//! ### Default Limits
+//! - **Token Limit**: 880,000 tokens (Max20 configuration)
+//! - **Budget Limit**: ~$1.50 per 1000 tokens
+//! - **Refresh Rate**: 3 seconds
+//! - **Cache Duration**: 30 seconds for session block data
+//!
+//! ## Session Detection
+//!
+//! The monitor automatically discovers active sessions by:
+//! - Scanning Claude instance directories
+//! - Reading session block files
+//! - Finding sessions with end times in the future
+//! - Caching results for performance
+//!
+//! ## Usage Examples
+//!
+//! ### Live Monitoring
+//! ```rust
+//! use claude_usage::monitor::LiveMonitor;
+//!
+//! # async fn example() -> anyhow::Result<()> {
+//! let mut monitor = LiveMonitor::new();
+//! 
+//! // Start live monitoring (blocks until Ctrl+C)
+//! monitor.run_live_monitor(false, false, false).await?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ### Snapshot Mode
+//! ```rust
+//! use claude_usage::monitor::LiveMonitor;
+//!
+//! # async fn example() -> anyhow::Result<()> {
+//! let mut monitor = LiveMonitor::new();
+//! 
+//! // Get single snapshot
+//! monitor.run_live_monitor(false, true, false).await?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ### JSON Output
+//! ```rust
+//! use claude_usage::monitor::LiveMonitor;
+//!
+//! # async fn example() -> anyhow::Result<()> {
+//! let mut monitor = LiveMonitor::new();
+//! 
+//! // Get JSON snapshot
+//! monitor.run_live_monitor(true, true, false).await?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## Integration Points
+//!
+//! The monitor integrates with:
+//! - [`crate::parser::FileParser`] for session block discovery and parsing
+//! - [`crate::models::SessionBlock`] for session timing and token data
+//! - Terminal control libraries for cursor management and screen clearing
+//! - Tokio async runtime for non-blocking updates and signal handling
+
 use crate::models::*;
 use crate::parser::FileParser;
 use anyhow::Result;
@@ -7,15 +130,21 @@ use std::time::Duration;
 use tokio::time;
 
 pub struct LiveMonitor {
-    parser: FileParser,
+    file_parser: FileParser,
     cached_blocks: Option<Vec<SessionBlock>>,
     cache_time: Option<std::time::Instant>,
+}
+
+impl Default for LiveMonitor {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl LiveMonitor {
     pub fn new() -> Self {
         Self {
-            parser: FileParser::new(),
+            file_parser: FileParser::new(),
             cached_blocks: None,
             cache_time: None,
         }
@@ -26,7 +155,7 @@ impl LiveMonitor {
         const BUDGET_LIMIT: f64 = TOKEN_LIMIT as f64 * 0.0015; // ~$1.50 per 1000 tokens
         
         // Store exclude_vms for use in other methods
-        self.parser = FileParser::new(); // We'll pass exclude_vms to discover_claude_paths directly
+        self.file_parser = FileParser::new(); // We'll pass exclude_vms to discover_claude_paths directly
         
         if json_output || snapshot {
             // Snapshot mode for JSON or when --snapshot is used
@@ -101,11 +230,11 @@ impl LiveMonitor {
             if let Some(block) = active_block {
                 self.display_active_session(&block, token_limit, budget_limit, &current_time, exclude_vms).await?;
                 println!("\n[Snapshot mode - aggregated from active sessions across {} Claude instances]", 
-                         self.parser.discover_claude_paths(exclude_vms)?.len());
+                         self.file_parser.discover_claude_paths(exclude_vms)?.len());
             } else {
                 self.display_inactive_session(token_limit, budget_limit, &current_time, exclude_vms).await?;
                 println!("\n[Snapshot mode - scanned {} Claude instances]", 
-                         self.parser.discover_claude_paths(exclude_vms)?.len());
+                         self.file_parser.discover_claude_paths(exclude_vms)?.len());
             }
         }
         
@@ -113,8 +242,8 @@ impl LiveMonitor {
     }
 
     async fn display_active_session(&self, block: &SessionBlock, token_limit: u32, budget_limit: f64, current_time: &str, _exclude_vms: bool) -> Result<()> {
-        let start_time = self.parser.parse_timestamp(&block.start_time)?;
-        let end_time = self.parser.parse_timestamp(&block.end_time)?;
+        let start_time = self.file_parser.parse_timestamp(&block.start_time)?;
+        let end_time = self.file_parser.parse_timestamp(&block.end_time)?;
         let now = Utc::now();
         
         let total_tokens = block.token_counts.total();
@@ -228,8 +357,8 @@ impl LiveMonitor {
     }
 
     async fn create_snapshot_data(&self, block: &SessionBlock, token_limit: u32, budget_limit: f64) -> Result<serde_json::Value> {
-        let start_time = self.parser.parse_timestamp(&block.start_time)?;
-        let end_time = self.parser.parse_timestamp(&block.end_time)?;
+        let start_time = self.file_parser.parse_timestamp(&block.start_time)?;
+        let end_time = self.file_parser.parse_timestamp(&block.end_time)?;
         let now = Utc::now();
         
         let total_tokens = block.token_counts.total();
@@ -282,7 +411,7 @@ impl LiveMonitor {
             if current_time.duration_since(*cache_time).as_secs() < 30 {
                 let now = Utc::now();
                 for block in blocks {
-                    if let Ok(end_time) = self.parser.parse_timestamp(&block.end_time) {
+                    if let Ok(end_time) = self.file_parser.parse_timestamp(&block.end_time) {
                         if end_time > now {
                             return Ok(Some(block.clone()));
                         }
@@ -293,13 +422,13 @@ impl LiveMonitor {
         }
         
         // Load fresh session blocks
-        let claude_paths = self.parser.discover_claude_paths(exclude_vms)?;
-        let blocks = self.parser.get_latest_session_blocks(&claude_paths)?;
+        let claude_paths = self.file_parser.discover_claude_paths(exclude_vms)?;
+        let blocks = self.file_parser.get_latest_session_blocks(&claude_paths)?;
         let now = Utc::now();
         
         // Find active block
         for block in &blocks {
-            if let Ok(end_time) = self.parser.parse_timestamp(&block.end_time) {
+            if let Ok(end_time) = self.file_parser.parse_timestamp(&block.end_time) {
                 if end_time > now {
                     // Update cache
                     self.cached_blocks = Some(blocks.clone());

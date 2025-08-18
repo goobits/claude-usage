@@ -1,0 +1,33 @@
+# Claude Usage Configuration File
+# Copy to claude-usage.toml or ~/.config/claude-usage/config.toml
+
+[logging]
+level = "INFO"           # DEBUG, INFO, WARN, ERROR
+format = "pretty"        # pretty, json
+output = "console"       # console, file, both
+
+[processing]
+batch_size = 10          # Files to process in parallel
+parallel_chunks = 4      # Parallel processing threads
+max_retries = 3          # Retry failed operations
+progress_interval_mb = 10 # Progress reporting interval
+
+[memory]
+max_memory_mb = 512      # Maximum memory usage
+buffer_size_kb = 8       # Stream buffer size
+warning_threshold_pct = 90 # Memory warning threshold
+
+[dedup]
+window_hours = 24        # Deduplication time window
+cleanup_threshold = 10000 # Cleanup after N entries
+enabled = true           # Enable/disable deduplication
+
+[output]
+json_pretty = false      # Pretty-print JSON output
+include_metadata = false # Include extra metadata
+timestamp_format = "%Y-%m-%d %H:%M:%S" # Time format
+
+[paths]
+claude_home = "~/.claude"           # Claude Desktop directory
+vms_directory = "~/.claude/vms"     # VMs directory
+log_directory = "logs"              # Log file directory

@@ -1,9 +1,113 @@
+//! Output Formatting and Display Management
+//!
+//! This module handles all output formatting for Claude usage analysis results.
+//! It provides both human-readable terminal output with colors and structured JSON
+//! output for programmatic consumption.
+//!
+//! ## Core Functionality
+//!
+//! ### Report Types
+//! - **Daily Reports**: Day-by-day usage breakdown with project-level details
+//! - **Monthly Reports**: Month-by-month usage summaries with totals
+//! - **JSON Output**: Machine-readable structured data for API consumption
+//! - **Terminal Output**: Human-friendly colored output with progress indicators
+//!
+//! ### Display Features
+//! - **Color-coded Output**: Uses different colors for costs, dates, and metrics
+//! - **Project Breakdown**: Shows usage per project within each time period
+//! - **Percentage Calculations**: Displays relative usage between projects
+//! - **Summary Statistics**: Provides totals and counts across all data
+//!
+//! ## Key Types
+//!
+//! - [`DisplayManager`] - Main interface for all display operations
+//!
+//! ## Output Formats
+//!
+//! ### Daily Reports
+//! Daily reports show usage for each day with project-level breakdown:
+//! - Date and total cost per day
+//! - Individual project costs and percentages
+//! - Session counts per project
+//! - Configurable display limits (default: 30 days)
+//!
+//! ### Monthly Reports
+//! Monthly reports provide higher-level summaries:
+//! - Month-by-month cost totals
+//! - Session counts per month
+//! - Configurable display limits (default: 10 months)
+//! - Reverse chronological ordering (most recent first)
+//!
+//! ### JSON Output
+//! When `json_output` is enabled, all reports are formatted as structured JSON:
+//! ```json
+//! {
+//!   "daily": [
+//!     {
+//!       "date": "2024-01-15",
+//!       "projects": [
+//!         {
+//!           "project": "my-project",
+//!           "sessions": 3,
+//!           "totalCost": 1.25,
+//!           "totalTokens": 15000
+//!         }
+//!       ],
+//!       "totalCost": 1.25,
+//!       "totalSessions": 3
+//!     }
+//!   ]
+//! }
+//! ```
+//!
+//! ## Data Processing
+//!
+//! ### Daily Aggregation
+//! - Processes session data to create daily summaries
+//! - Handles overlapping sessions across day boundaries
+//! - Ensures accurate session counting (sessions counted once per day)
+//! - Generates reports for last N days, including days with no activity
+//!
+//! ### Monthly Aggregation
+//! - Groups daily data into monthly buckets
+//! - Tracks unique sessions per month
+//! - Applies display limits for recent months
+//! - Sorts chronologically for easy trend analysis
+//!
+//! ## Usage Example
+//!
+//! ```rust
+//! use claude_usage::display::DisplayManager;
+//!
+//! let display_manager = DisplayManager::new();
+//! let sessions = vec![/* session data */];
+//!
+//! // Display daily report
+//! display_manager.display_daily(&sessions, Some(7), false);
+//!
+//! // Display monthly report
+//! display_manager.display_monthly(&sessions, Some(6), false);
+//! ```
+//!
+//! ## Integration Points
+//!
+//! The display manager integrates with:
+//! - [`crate::models`] for data structure definitions
+//! - [`crate::analyzer::ClaudeUsageAnalyzer`] for receiving processed data
+//! - Terminal color libraries for enhanced visual output
+
 use crate::models::*;
 use std::collections::{HashMap, HashSet};
 use serde_json;
 use colored::Colorize;
 
 pub struct DisplayManager;
+
+impl Default for DisplayManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl DisplayManager {
     pub fn new() -> Self {
@@ -15,7 +119,13 @@ impl DisplayManager {
         
         if json_output {
             let output = serde_json::json!({"daily": daily_data});
-            println!("{}", serde_json::to_string_pretty(&output).unwrap());
+            match serde_json::to_string_pretty(&output) {
+                Ok(json_str) => println!("{}", json_str),
+                Err(e) => {
+                    eprintln!("Error serializing daily data to JSON: {}", e);
+                    return;
+                }
+            }
             return;
         }
         
@@ -62,7 +172,13 @@ impl DisplayManager {
         
         if json_output {
             let output = serde_json::json!({"monthly": monthly_data});
-            println!("{}", serde_json::to_string_pretty(&output).unwrap());
+            match serde_json::to_string_pretty(&output) {
+                Ok(json_str) => println!("{}", json_str),
+                Err(e) => {
+                    eprintln!("Error serializing monthly data to JSON: {}", e);
+                    return;
+                }
+            }
             return;
         }
         
@@ -103,7 +219,7 @@ impl DisplayManager {
         // Process each session's daily usage breakdown
         for session in session_data {
             for (date, daily_usage) in &session.daily_usage {
-                let date_projects = daily_aggregates.entry(date.clone()).or_insert_with(HashMap::new);
+                let date_projects = daily_aggregates.entry(date.clone()).or_default();
                 
                 let project = date_projects.entry(session.project_path.clone()).or_insert_with(|| {
                     DailyProject {

@@ -1,0 +1,32 @@
+# Claude Usage Configuration File for Testing
+
+[logging]
+level = "INFO"
+format = "pretty"
+output = "console"
+
+[processing]
+batch_size = 5
+parallel_chunks = 2
+max_retries = 3
+progress_interval_mb = 10
+
+[memory]
+max_memory_mb = 128
+buffer_size_kb = 4
+warning_threshold_pct = 80
+
+[dedup]
+window_hours = 24
+cleanup_threshold = 10000
+enabled = true
+
+[output]
+json_pretty = true
+include_metadata = false
+timestamp_format = "%Y-%m-%d %H:%M:%S"
+
+[paths]
+claude_home = "~/.claude"
+vms_directory = "~/.claude/vms"
+log_directory = "logs"

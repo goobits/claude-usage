@@ -1,0 +1,33 @@
+# Development Configuration for Claude Usage
+# For local development and debugging
+
+[logging]
+level = "DEBUG"
+format = "pretty"
+output = "console"
+
+[processing]
+batch_size = 5           # Smaller batches for debugging
+parallel_chunks = 2      # Fewer threads for easier debugging
+max_retries = 2
+progress_interval_mb = 5 # More frequent progress updates
+
+[memory]
+max_memory_mb = 256      # Lower memory for dev environments
+buffer_size_kb = 4
+warning_threshold_pct = 80
+
+[dedup]
+window_hours = 12        # Shorter window for faster testing
+cleanup_threshold = 1000
+enabled = true
+
+[output]
+json_pretty = true       # Pretty JSON for readability
+include_metadata = true  # Extra metadata for debugging
+timestamp_format = "%Y-%m-%d %H:%M:%S"
+
+[paths]
+claude_home = "~/.claude"
+vms_directory = "~/.claude/vms"
+log_directory = "./dev-logs"

@@ -16,6 +16,15 @@ The application is built using a modular Rust architecture with these key compon
 - **Multiple Display Modes**: Daily, monthly, and live monitoring views
 - **Performance Optimization**: File-level date filtering, streaming JSON parsing, and time-windowed deduplication
 
+### Production Features (New)
+
+- **Claude-Keeper Integration**: Schema-resilient parsing that handles field name variations (camelCase/snake_case)
+- **Structured Logging**: JSON logging for production with tracing spans and correlation IDs
+- **Streaming Parser**: Memory-safe line-by-line processing (8KB buffer for any file size)
+- **Configuration System**: Environment variables and TOML config files for runtime tuning
+- **Memory Safety**: Bounded memory usage with configurable limits and monitoring
+- **Error Recovery**: Continues processing despite malformed JSON lines
+
 ### Key Data Flow
 
 1. **Discovery**: Scans `~/.claude/projects/*/` directories for `*.jsonl` files
@@ -33,17 +42,39 @@ The live monitor (`claude-usage live`) provides real-time usage tracking with:
 
 ## Installation & Common Commands
 
+### Prerequisites
+
+**Install Rust if not already present:**
+```bash
+# Check if Rust is installed
+which rustc && rustc --version
+
+# If not installed, install Rust:
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source $HOME/.cargo/env
+```
+
+**Rust installation locations:**
+- Binary: `~/.cargo/bin/rustc` and `~/.cargo/bin/cargo`
+- Configuration: `~/.cargo/config.toml`
+- Environment: `~/.cargo/env` (sourced in shell profile)
+
+### Building and Running
+
 **Use cargo for installation** as this is a Rust CLI tool:
 
 ```bash
-# Production install
-cargo install --path .
+# Production build with keeper integration
+cargo build --release --features keeper-integration
 
-# Development build
-cargo build --release
+# The binary will be at:
+# target/release/claude-usage
+
+# Install globally (optional)
+cargo install --path . --features keeper-integration
 
 # Run the tool
-claude-usage [command] [options]
+./target/release/claude-usage [command] [options]
 
 # Basic usage reports
 claude-usage daily           # Daily breakdown with projects
@@ -59,7 +90,19 @@ claude-usage daily --limit 5
 
 # JSON output
 claude-usage daily --json
+```
 
+### Production Configuration
+
+```bash
+# Environment variables for production
+export LOG_LEVEL=INFO                    # DEBUG, INFO, WARN, ERROR
+export LOG_FORMAT=json                   # json for production, pretty for dev
+export CLAUDE_USAGE_MAX_MEMORY_MB=1024   # Memory limit
+export CLAUDE_USAGE_BATCH_SIZE=20        # Parallel processing batch size
+
+# Or use config file (claude-usage.toml)
+cp claude-usage.toml.example claude-usage.toml
 ```
 
 ## Data Sources

@@ -1,7 +1,89 @@
+//! JSONL File Parser and Processing Engine
+//!
+//! This module provides comprehensive parsing capabilities for Claude usage data stored in
+//! JSONL (JSON Lines) format. It offers both streaming and batch processing with flexible
+//! processor patterns for different use cases.
+//!
+//! ## Core Functionality
+//!
+//! ### File Discovery and Management
+//! - Automatic discovery of Claude instance directories across local projects and VMs
+//! - JSONL file identification and filtering based on date ranges
+//! - Session block parsing for real-time monitoring
+//! - File sorting by timestamp for chronological processing
+//!
+//! ### Parsing Architecture
+//! - **Streaming Processing**: Memory-efficient line-by-line parsing using the [`JsonlProcessor`] trait
+//! - **Batch Collection**: Traditional approach collecting all entries into memory
+//! - **Filtered Processing**: Custom predicate-based filtering during parsing
+//! - **Processed Entries**: Enhanced entry objects with extracted metadata
+//!
+//! ## Key Types
+//!
+//! ### Main Parser
+//! - [`FileParser`] - Primary interface for all parsing operations
+//!
+//! ### Processing Patterns
+//! - [`JsonlProcessor`] - Trait for custom JSONL processing logic
+//! - [`ProcessedEntry`] - Enhanced usage entry with parsed timestamp and metadata
+//!
+//! ### Built-in Processors
+//! - [`CollectorProcessor`] - Collects all entries into a Vec
+//! - [`CountProcessor`] - Counts entries without storing them
+//! - [`FilterProcessor`] - Filters entries based on a predicate function
+//! - [`StreamProcessor`] - Processes entries through a callback function
+//! - [`ProcessedEntryCollector`] - Collects enhanced ProcessedEntry objects
+//! - [`ValidEntryProcessor`] - Processes only entries with valid usage data
+//!
+//! ## Usage Examples
+//!
+//! ### Basic File Parsing
+//! ```rust
+//! use claude_usage::parser::FileParser;
+//!
+//! let parser = FileParser::new();
+//! let claude_paths = parser.discover_claude_paths(false)?;
+//! let jsonl_files = parser.find_jsonl_files(&claude_paths)?;
+//! ```
+//!
+//! ### Custom Processing
+//! ```rust
+//! use claude_usage::parser::{FileParser, JsonlProcessor};
+//! use anyhow::Result;
+//!
+//! struct MyProcessor {
+//!     total_tokens: u32,
+//! }
+//!
+//! impl JsonlProcessor for MyProcessor {
+//!     type Output = u32;
+//!     
+//!     fn process_entry(&mut self, entry: UsageEntry, _line: usize) -> Result<()> {
+//!         if let Some(usage) = &entry.message.usage {
+//!             self.total_tokens += usage.input_tokens + usage.output_tokens;
+//!         }
+//!         Ok(())
+//!     }
+//!     
+//!     fn finalize(self) -> Result<Self::Output> {
+//!         Ok(self.total_tokens)
+//!     }
+//! }
+//! ```
+//!
+//! ## Integration Points
+//!
+//! This parser integrates with:
+//! - [`FileDiscovery`] for Claude instance detection
+//! - [`TimestampParser`] for date/time handling
+//! - [`SessionUtils`] for session management utilities
+//! - Main analysis pipeline through [`crate::analyzer::ClaudeUsageAnalyzer`]
+
 use crate::models::*;
 use crate::file_discovery::FileDiscovery;
 use crate::timestamp_parser::TimestampParser;
 use crate::session_utils::SessionUtils;
+use crate::keeper_integration::KeeperIntegration;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use std::fs::File;
@@ -10,9 +92,11 @@ use std::path::{Path, PathBuf};
 
 pub struct FileParser {
     file_discovery: FileDiscovery,
+    keeper_integration: KeeperIntegration,
 }
 
 // Trait for custom JSONL processing
+#[allow(dead_code)]
 pub trait JsonlProcessor {
     type Output;
     
@@ -82,10 +166,17 @@ impl ProcessedEntry {
 }
 
 
+impl Default for FileParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FileParser {
     pub fn new() -> Self {
         Self {
             file_discovery: FileDiscovery::new(),
+            keeper_integration: KeeperIntegration::new(),
         }
     }
 
@@ -110,6 +201,7 @@ impl FileParser {
         self.file_discovery.sort_files_by_timestamp(file_tuples)
     }
 
+    #[allow(dead_code)]
     pub fn parse_jsonl_file(&self, file_path: &Path) -> Result<Vec<UsageEntry>> {
         // Use the default collector processor
         let processor = CollectorProcessor::new();
@@ -117,6 +209,7 @@ impl FileParser {
     }
     
     // Generic method that accepts any processor
+    #[allow(dead_code)]
     pub fn process_jsonl_file<P: JsonlProcessor>(&self, file_path: &Path, mut processor: P) -> Result<P::Output> {
         let file = File::open(file_path)?;
         let reader = BufReader::new(file);
@@ -130,7 +223,7 @@ impl FileParser {
                 continue;
             }
             
-            if let Ok(entry) = serde_json::from_str::<UsageEntry>(&line) {
+            if let Some(entry) = self.keeper_integration.parse_single_line(line) {
                 processor.process_entry(entry, line_number)?;
             }
         }
@@ -165,16 +258,24 @@ impl FileParser {
     }
 
     fn parse_session_blocks_file(&self, file_path: &Path) -> Result<Vec<SessionBlock>> {
-        SessionUtils::parse_session_blocks_file(file_path)
+        SessionUtils::parse_session_blocks_file(file_path, &self.keeper_integration)
     }
 }
 
 // Default processor that collects all entries into a Vec
+#[allow(dead_code)]
 pub struct CollectorProcessor {
     entries: Vec<UsageEntry>,
 }
 
+impl Default for CollectorProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CollectorProcessor {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self { entries: Vec::new() }
     }
@@ -200,6 +301,12 @@ pub struct CountProcessor {
 }
 
 #[allow(dead_code)]
+impl Default for CountProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CountProcessor {
     pub fn new() -> Self {
         Self { count: 0 }
@@ -305,6 +412,12 @@ pub struct ProcessedEntryCollector {
 }
 
 #[allow(dead_code)]
+impl Default for ProcessedEntryCollector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ProcessedEntryCollector {
     pub fn new() -> Self {
         Self {

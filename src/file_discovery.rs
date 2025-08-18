@@ -4,14 +4,24 @@ use std::fs::{File, metadata};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use glob::glob;
-use crate::models::*;
+use crate::keeper_integration::KeeperIntegration;
 
 /// Handles file system traversal and discovery of Claude usage data files
-pub struct FileDiscovery;
+pub struct FileDiscovery {
+    keeper_integration: KeeperIntegration,
+}
+
+impl Default for FileDiscovery {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl FileDiscovery {
     pub fn new() -> Self {
-        Self
+        Self {
+            keeper_integration: KeeperIntegration::new(),
+        }
     }
 
     /// Discover all Claude installation paths (main + VMs)
@@ -179,7 +189,7 @@ impl FileDiscovery {
         
         // Parse timestamps from first and last entries
         if let Some(line) = first_line {
-            if let Ok(entry) = serde_json::from_str::<UsageEntry>(&line) {
+            if let Some(entry) = self.keeper_integration.parse_single_line(&line) {
                 if let Ok(timestamp) = crate::timestamp_parser::TimestampParser::parse(&entry.timestamp) {
                     earliest_timestamp = Some(timestamp);
                 }
@@ -187,7 +197,7 @@ impl FileDiscovery {
         }
         
         if let Some(line) = last_line {
-            if let Ok(entry) = serde_json::from_str::<UsageEntry>(&line) {
+            if let Some(entry) = self.keeper_integration.parse_single_line(&line) {
                 if let Ok(timestamp) = crate::timestamp_parser::TimestampParser::parse(&entry.timestamp) {
                     latest_timestamp = Some(timestamp);
                 }
@@ -209,7 +219,7 @@ impl FileDiscovery {
                 continue;
             }
             
-            if let Ok(entry) = serde_json::from_str::<UsageEntry>(&line) {
+            if let Some(entry) = self.keeper_integration.parse_single_line(line) {
                 if let Ok(timestamp) = crate::timestamp_parser::TimestampParser::parse(&entry.timestamp) {
                     return Ok(Some(timestamp));
                 }

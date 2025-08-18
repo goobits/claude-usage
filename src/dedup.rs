@@ -1,6 +1,97 @@
+//! Deduplication Engine
+//!
+//! This module provides intelligent deduplication capabilities to prevent double-counting
+//! of Claude usage data across multiple analysis runs and overlapping data sources.
+//! The engine uses time-windowed hashing with automatic cleanup for optimal performance.
+//!
+//! ## Core Functionality
+//!
+//! ### Deduplication Strategy
+//! - **Unique Hash Generation**: Creates deterministic hashes from usage entry content
+//! - **Time-Windowed Deduplication**: Only considers duplicates within a configurable time window
+//! - **Global Tracking**: Maintains global state across all processed files and sessions
+//! - **Automatic Cleanup**: Periodically removes old hashes to prevent memory growth
+//!
+//! ### Processing Pipeline
+//! The deduplication engine coordinates the complete data processing pipeline:
+//!
+//! 1. **File Processing**: Handles files in parallel chunks with configurable batch sizes
+//! 2. **Entry Validation**: Filters out entries without valid usage data
+//! 3. **Duplicate Detection**: Uses content-based hashing with time-window validation
+//! 4. **Cost Calculation**: Integrates with pricing manager for accurate cost computation
+//! 5. **Session Aggregation**: Groups entries by session and project with daily breakdowns
+//! 6. **Project Path Extraction**: Intelligently extracts meaningful project names from paths
+//!
+//! ## Key Types
+//!
+//! - [`DeduplicationEngine`] - Main deduplication coordinator
+//! - [`ProcessOptions`] - Configuration for processing operations
+//!
+//! ## Configuration
+//!
+//! The engine respects configuration settings from [`crate::config`]:
+//! - `dedup.window_hours` - Time window for considering duplicates (default: 24 hours)
+//! - `dedup.cleanup_threshold` - Number of hashes before triggering cleanup (default: 10,000)
+//! - `processing.batch_size` - Number of files to process in parallel (default: 10)
+//!
+//! ## Performance Optimizations
+//!
+//! ### Memory Management
+//! - **Streaming Processing**: Processes files without loading entire dataset into memory
+//! - **Periodic Cleanup**: Automatically removes old hash entries to prevent memory growth
+//! - **Efficient Data Structures**: Uses DashMap for concurrent access with minimal locking
+//!
+//! ### Parallel Processing
+//! - **Chunked Processing**: Processes files in parallel chunks for optimal throughput
+//! - **Early Exit**: Stops processing when limits are reached (for session queries)
+//! - **Rayon Integration**: Leverages work-stealing for efficient parallel execution
+//!
+//! ### Intelligent Filtering
+//! - **Date Range Filtering**: Pre-filters files by modification time before parsing
+//! - **Usage Data Validation**: Skips entries without meaningful token usage
+//! - **Duplicate Skip**: Fast hash-based duplicate detection with time constraints
+//!
+//! ## Project Path Extraction
+//!
+//! The engine includes sophisticated logic for extracting meaningful project names:
+//! - Handles standard project structures: `projects/project-name`
+//! - Supports VM-based projects: `vms/vm-name/projects/...`
+//! - Processes encoded paths with dash-separated components
+//! - Provides fallback handling for unexpected directory structures
+//!
+//! ## Usage Example
+//!
+//! ```rust
+//! use claude_usage::dedup::{DeduplicationEngine, ProcessOptions};
+//!
+//! # async fn example() -> anyhow::Result<()> {
+//! let engine = DeduplicationEngine::new();
+//! let options = ProcessOptions {
+//!     command: "daily".to_string(),
+//!     json_output: false,
+//!     limit: None,
+//!     since_date: None,
+//!     until_date: None,
+//!     snapshot: false,
+//!     exclude_vms: false,
+//! };
+//!
+//! // Process files with deduplication
+//! let sessions = engine.process_files_with_global_dedup(
+//!     file_tuples,
+//!     &options,
+//!     &parser
+//! ).await?;
+//! # Ok(())
+//! # }
+//! ```
+
 use crate::models::{*, DailyUsage};
+use crate::parser_wrapper::UnifiedParser;
 use crate::parser::FileParser;
 use crate::pricing::PricingManager;
+use crate::config::get_config;
+use crate::memory;
 use dashmap::DashSet;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -8,6 +99,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use rayon::prelude::*;
+use tracing;
 
 pub struct DeduplicationEngine {
     global_hashes: Arc<DashSet<String>>,
@@ -16,13 +108,21 @@ pub struct DeduplicationEngine {
     dedup_cleanup_threshold: usize,
 }
 
+impl Default for DeduplicationEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DeduplicationEngine {
     pub fn new() -> Self {
+        let config = get_config();
+        
         Self {
             global_hashes: Arc::new(DashSet::new()),
             hash_timestamps: Arc::new(dashmap::DashMap::new()),
-            dedup_window_hours: 24,
-            dedup_cleanup_threshold: 10000,
+            dedup_window_hours: config.dedup.window_hours,
+            dedup_cleanup_threshold: config.dedup.cleanup_threshold,
         }
     }
 
@@ -30,8 +130,9 @@ impl DeduplicationEngine {
         &self,
         sorted_file_tuples: Vec<(PathBuf, PathBuf)>,
         options: &ProcessOptions,
+        parser: &UnifiedParser,
     ) -> Result<Vec<SessionOutput>> {
-        let parser = FileParser::new();
+        let file_parser = FileParser::new();
         let mut sessions_by_dir: HashMap<PathBuf, SessionData> = HashMap::new();
         
         let need_timestamps = matches!(options.command.as_str(), "daily" | "session" | "monthly");
@@ -43,19 +144,58 @@ impl DeduplicationEngine {
         let should_stop_early = options.limit.is_some() && options.command == "session";
         
         // Process files in parallel chunks for better performance
-        let chunk_size = 10; // Process 10 files at a time
+        let base_chunk_size = get_config().processing.batch_size;
+        let adaptive_chunk_size = memory::get_adaptive_batch_size(base_chunk_size);
         let mut _processed_files = 0;
         
-        for chunk in sorted_file_tuples.chunks(chunk_size) {
+        // Log adaptive sizing decision
+        tracing::debug!(
+            base_chunk_size = base_chunk_size,
+            adaptive_chunk_size = adaptive_chunk_size,
+            memory_pressure = ?memory::get_pressure_level(),
+            "Using adaptive chunk size for parallel processing"
+        );
+        
+        for chunk in sorted_file_tuples.chunks(adaptive_chunk_size) {
             // Early exit optimization
             if should_stop_early && session_count >= options.limit.unwrap_or(0) {
                 break;
             }
             
-            // Process chunk in parallel
+            // Check memory pressure before processing chunk
+            if memory::check_memory_pressure() {
+                tracing::warn!(
+                    chunk_files = chunk.len(),
+                    memory_stats = ?memory::get_memory_stats(),
+                    "Memory pressure detected before processing chunk"
+                );
+                
+                // Try to trigger GC if needed
+                memory::try_gc_if_needed()?;
+                
+                // If critical pressure, consider processing smaller chunks
+                if memory::should_spill_to_disk() {
+                    tracing::warn!(
+                        chunk_files = chunk.len(),
+                        "Critical memory pressure - consider reducing chunk size"
+                    );
+                }
+            }
+            
+            // Process chunk in parallel - USE UnifiedParser
             let chunk_results: Vec<_> = chunk.par_iter()
                 .map(|(jsonl_file, session_dir)| {
+                    // Track memory for each file being processed
+                    let file_size = std::fs::metadata(jsonl_file)
+                        .map(|m| m.len() as usize)
+                        .unwrap_or(0);
+                    memory::track_allocation(file_size);
+                    
                     let entries = parser.parse_jsonl_file(jsonl_file)?;
+                    
+                    // Clean up file memory tracking
+                    memory::track_deallocation(file_size);
+                    
                     Ok::<_, anyhow::Error>((entries, session_dir.clone()))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
@@ -76,11 +216,11 @@ impl DeduplicationEngine {
                 
                 total_entries_processed += 1;
                 
-                // Create unique hash for deduplication
-                let unique_hash = parser.create_unique_hash(&entry);
+                // Create unique hash for deduplication - use file_parser for utility
+                let unique_hash = file_parser.create_unique_hash(&entry);
                 
-                // Get current entry timestamp
-                let current_timestamp = parser.parse_timestamp(&entry.timestamp).ok();
+                // Get current entry timestamp - use file_parser for utility
+                let current_timestamp = file_parser.parse_timestamp(&entry.timestamp).ok();
                 
                 // Optimized deduplication: only check within time window
                 let mut skip_duplicate = false;
@@ -118,21 +258,17 @@ impl DeduplicationEngine {
                 if self.hash_timestamps.len() > self.dedup_cleanup_threshold {
                     if let Some(current_time) = current_timestamp {
                         let cutoff_time = current_time - chrono::Duration::hours(self.dedup_window_hours * 2);
-                        let old_hashes: Vec<String> = self.hash_timestamps
-                            .iter()
-                            .filter_map(|item| {
-                                if *item.value() < cutoff_time {
-                                    Some(item.key().clone())
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect();
                         
-                        for old_hash in old_hashes {
-                            self.hash_timestamps.remove(&old_hash);
-                            self.global_hashes.remove(&old_hash);
-                        }
+                        // Use retain() for efficient in-place cleanup without allocating a vector
+                        self.hash_timestamps.retain(|key, timestamp| {
+                            if *timestamp < cutoff_time {
+                                // Also remove from global_hashes when removing from timestamps
+                                self.global_hashes.remove(key);
+                                false // Remove this entry from hash_timestamps
+                            } else {
+                                true // Keep this entry
+                            }
+                        });
                     }
                 }
                 
@@ -149,9 +285,9 @@ impl DeduplicationEngine {
                 let project_name = if let Some(claude_pos) = full_path.find("/.claude/") {
                     let after_claude = &full_path[claude_pos + 9..]; // "/.claude/" is 9 chars
                     
-                    if after_claude.starts_with("projects/") {
+                    if let Some(project_part) = after_claude.strip_prefix("projects/") {
                         // For main projects, check if it's a simple project name or has path structure
-                        let project_part = &after_claude[9..]; // Skip "projects/"
+                        // Skip "projects/"
                         if project_part.starts_with('-') {
                             // Handle cases like "projects/-home-miko-projects-system-weather" -> "projects/system-weather"
                             if let Some(last_dash) = project_part.rfind('-') {
@@ -167,9 +303,9 @@ impl DeduplicationEngine {
                         } else {
                             format!("projects/{}", project_part)
                         }
-                    } else if after_claude.starts_with("vms/") {
+                    } else if let Some(vm_part) = after_claude.strip_prefix("vms/") {
                         // For VMs, extract vm_name from "vms/vm_name/projects/-workspace" -> "vms/vm_name"
-                        let vm_part = &after_claude[4..]; // Skip "vms/"
+                        // Skip "vms/"
                         if let Some(slash_pos) = vm_part.find('/') {
                             let vm_name = &vm_part[..slash_pos];
                             format!("vms/{}", vm_name)
@@ -184,14 +320,14 @@ impl DeduplicationEngine {
                     session_dir_name.to_string()
                 };
                 
-                let (session_id, _) = parser.extract_session_info(session_dir_name);
+                let (session_id, _) = file_parser.extract_session_info(session_dir_name);
                 
                 // Get or create session data (use full path like Python)
                 let session_data = sessions_by_dir.entry(session_dir.clone())
                     .or_insert_with(|| SessionData::new(session_id, project_name));
                 
                 // Get the date for this entry (use UTC for consistent bucketing)
-                let entry_date = if let Ok(timestamp) = parser.parse_timestamp(&entry.timestamp) {
+                let entry_date = if let Ok(timestamp) = file_parser.parse_timestamp(&entry.timestamp) {
                     timestamp.format("%Y-%m-%d").to_string()
                 } else {
                     "unknown".to_string()
@@ -226,12 +362,11 @@ impl DeduplicationEngine {
                 session_data.models_used.insert(entry.message.model.clone());
                 
                 // Update last activity if needed
-                if need_timestamps {
-                    if session_data.last_activity.is_none() || 
-                       session_data.last_activity.as_ref().unwrap() < &entry_date {
+                if need_timestamps
+                    && (session_data.last_activity.is_none() || 
+                       session_data.last_activity.as_ref().unwrap() < &entry_date) {
                         session_data.last_activity = Some(entry_date);
                     }
-                }
                 
                 has_session_data = true;
             }
@@ -241,6 +376,7 @@ impl DeduplicationEngine {
                 }
             }
         }
+        
         
         if !options.json_output {
             let status_msg = format!(
@@ -286,4 +422,51 @@ pub struct ProcessOptions {
     pub until_date: Option<DateTime<Utc>>,
     pub snapshot: bool,
     pub exclude_vms: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    
+    #[test]
+    fn test_retain_optimization_works() {
+        let dedup_engine = DeduplicationEngine::new();
+        
+        // Add some test entries with different timestamps
+        let now = Utc::now();
+        let old_time = now - chrono::Duration::hours(24);
+        let very_old_time = now - chrono::Duration::hours(72);
+        
+        // Insert some test hashes with timestamps
+        dedup_engine.hash_timestamps.insert("hash1".to_string(), now);
+        dedup_engine.hash_timestamps.insert("hash2".to_string(), old_time);
+        dedup_engine.hash_timestamps.insert("hash3".to_string(), very_old_time);
+        
+        dedup_engine.global_hashes.insert("hash1".to_string());
+        dedup_engine.global_hashes.insert("hash2".to_string());
+        dedup_engine.global_hashes.insert("hash3".to_string());
+        
+        // Simulate cleanup with cutoff time between old_time and very_old_time
+        let cutoff_time = now - chrono::Duration::hours(48);
+        
+        // Use the retain method like in our optimization
+        dedup_engine.hash_timestamps.retain(|key, timestamp| {
+            if *timestamp < cutoff_time {
+                dedup_engine.global_hashes.remove(key);
+                false
+            } else {
+                true
+            }
+        });
+        
+        // Verify that only very_old_time entries were removed
+        assert!(dedup_engine.hash_timestamps.contains_key("hash1"));
+        assert!(dedup_engine.hash_timestamps.contains_key("hash2"));
+        assert!(!dedup_engine.hash_timestamps.contains_key("hash3"));
+        
+        assert!(dedup_engine.global_hashes.contains("hash1"));
+        assert!(dedup_engine.global_hashes.contains("hash2"));
+        assert!(!dedup_engine.global_hashes.contains("hash3"));
+    }
 }

@@ -1,0 +1,47 @@
+name: Test Integration
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        features: ['', 'keeper-integration']
+    
+    steps:
+    - uses: actions/checkout@v2
+    
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+    
+    - name: Run tests
+      run: |
+        if [ "${{ matrix.features }}" != "" ]; then
+          cargo test --features ${{ matrix.features }}
+        else
+          cargo test
+        fi
+    
+    - name: Run benchmarks
+      run: |
+        if [ "${{ matrix.features }}" != "" ]; then
+          cargo bench --features ${{ matrix.features }} --no-run
+        else
+          cargo bench --no-run
+        fi
+    
+    - name: Check compilation
+      run: |
+        if [ "${{ matrix.features }}" != "" ]; then
+          cargo check --features ${{ matrix.features }}
+        else
+          cargo check
+        fi

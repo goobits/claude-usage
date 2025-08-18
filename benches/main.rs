@@ -1,8 +1,13 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
 use claude_usage::parser::FileParser;
+use claude_usage::parser_wrapper::UnifiedParser;
 use std::path::PathBuf;
 use tempfile::TempDir;
 use std::fs;
+use std::io::Write;
+use tempfile::NamedTempFile;
+
+use claude_usage::keeper_integration::KeeperIntegration;
 
 fn create_large_jsonl_file(dir: &std::path::Path, entries: usize) -> anyhow::Result<PathBuf> {
     let session_dir = dir.join("projects").join("benchmark-session");
@@ -64,10 +69,163 @@ fn benchmark_session_info_extraction(c: &mut Criterion) {
     });
 }
 
+/// Generate test JSONL data with specified number of lines for performance testing
+fn generate_performance_test_jsonl(num_lines: usize, include_errors: bool) -> String {
+    let mut lines = Vec::new();
+    
+    for i in 0..num_lines {
+        if include_errors && i % 10 == 5 {
+            // Insert malformed line every 10th entry
+            lines.push("{broken json}".to_string());
+        } else {
+            lines.push(format!(
+                r#"{{"timestamp":"2024-01-15T10:30:{}Z","message":{{"id":"msg_{}","model":"claude-3-5-sonnet-20241022","usage":{{"input_tokens":{},"output_tokens":{},"cache_creation_input_tokens":{},"cache_read_input_tokens":{}}}}},"costUSD":{},"requestId":"req_{}"}}"#,
+                format!("{:02}", i % 60),
+                i,
+                100 + i,
+                200 + i,
+                i % 50,
+                i % 100,
+                0.001 * (i as f64),
+                i
+            ));
+        }
+    }
+    
+    lines.join("\n")
+}
+
+fn create_performance_temp_file(content: &str) -> NamedTempFile {
+    let mut file = NamedTempFile::new().unwrap();
+    file.write_all(content.as_bytes()).unwrap();
+    file.flush().unwrap();
+    file
+}
+
+fn benchmark_legacy_parser_scaling(c: &mut Criterion) {
+    let mut group = c.benchmark_group("legacy_parser_scaling");
+    
+    for size in [10, 100, 1000, 10000].iter() {
+        let jsonl_content = generate_performance_test_jsonl(*size, false);
+        let temp_file = create_performance_temp_file(&jsonl_content);
+        
+        group.bench_with_input(
+            BenchmarkId::from_parameter(size),
+            size,
+            |b, _| {
+                let parser = FileParser::new();
+                b.iter(|| {
+                    parser.parse_jsonl_file(black_box(temp_file.path()))
+                });
+            },
+        );
+    }
+    
+    group.finish();
+}
+
+fn benchmark_keeper_parser_scaling(c: &mut Criterion) {
+    let mut group = c.benchmark_group("keeper_parser_scaling");
+    
+    for size in [10, 100, 1000, 10000].iter() {
+        let jsonl_content = generate_performance_test_jsonl(*size, false);
+        let temp_file = create_performance_temp_file(&jsonl_content);
+        
+        group.bench_with_input(
+            BenchmarkId::from_parameter(size),
+            size,
+            |b, _| {
+                let integration = KeeperIntegration::new();
+                b.iter(|| {
+                    integration.parse_jsonl_file(black_box(temp_file.path()))
+                });
+            },
+        );
+    }
+    
+    group.finish();
+}
+
+fn benchmark_error_handling_performance(c: &mut Criterion) {
+    let mut group = c.benchmark_group("error_handling_performance");
+    
+    // Test with 10% malformed lines
+    let jsonl_with_errors = generate_performance_test_jsonl(1000, true);
+    let temp_file = create_performance_temp_file(&jsonl_with_errors);
+    
+    group.bench_function("legacy_with_errors", |b| {
+        let parser = FileParser::new();
+        b.iter(|| {
+            parser.parse_jsonl_file(black_box(temp_file.path()))
+        });
+    });
+    
+    group.bench_function("keeper_with_errors", |b| {
+        let integration = KeeperIntegration::new();
+        b.iter(|| {
+            integration.parse_jsonl_file(black_box(temp_file.path()))
+        });
+    });
+    
+    group.finish();
+}
+
+fn benchmark_unified_parser_performance(c: &mut Criterion) {
+    let mut group = c.benchmark_group("unified_parser_performance");
+    
+    for size in [100, 1000, 5000].iter() {
+        let jsonl_content = generate_performance_test_jsonl(*size, false);
+        let temp_file = create_performance_temp_file(&jsonl_content);
+        
+        group.bench_with_input(
+            BenchmarkId::from_parameter(size),
+            size,
+            |b, _| {
+                let parser = UnifiedParser::new();
+                b.iter(|| {
+                    parser.parse_jsonl_file(black_box(temp_file.path()))
+                });
+            },
+        );
+    }
+    
+    group.finish();
+}
+
+fn benchmark_memory_usage_performance(c: &mut Criterion) {
+    let mut group = c.benchmark_group("memory_usage_performance");
+    
+    // Large file to test memory efficiency
+    let large_jsonl = generate_performance_test_jsonl(50000, false);
+    let temp_file = create_performance_temp_file(&large_jsonl);
+    
+    group.bench_function("legacy_large_file", |b| {
+        let parser = FileParser::new();
+        b.iter(|| {
+            parser.parse_jsonl_file(black_box(temp_file.path()))
+        });
+    });
+    
+    group.bench_function("keeper_large_file", |b| {
+        let integration = KeeperIntegration::new();
+        b.iter(|| {
+            integration.parse_jsonl_file(black_box(temp_file.path()))
+        });
+    });
+    
+    group.finish();
+}
+
 criterion_group!(
     benches,
     benchmark_jsonl_parsing,
     benchmark_timestamp_parsing,
-    benchmark_session_info_extraction
+    benchmark_session_info_extraction,
+    benchmark_legacy_parser_scaling,
+    benchmark_keeper_parser_scaling,
+    benchmark_error_handling_performance,
+    benchmark_unified_parser_performance,
+    benchmark_memory_usage_performance
 );
+
 criterion_main!(benches);

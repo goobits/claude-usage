@@ -1,9 +1,11 @@
 use clap::{Parser, Subcommand};
-use chrono;
 use anyhow::{Result, Context};
+use tracing::error;
 
 mod models;
 mod parser;
+mod parser_wrapper;
+mod keeper_integration;
 mod file_discovery;
 mod timestamp_parser;
 mod session_utils;
@@ -12,14 +14,19 @@ mod analyzer;
 mod display;
 mod monitor;
 mod pricing;
+mod logging;
+mod memory;
+mod config;
+
 
 use analyzer::ClaudeUsageAnalyzer;
 use dedup::ProcessOptions;
+use config::get_config;
 
 #[derive(Parser)]
 #[command(name = "claude-usage")]
 #[command(about = "Fast Rust implementation for Claude usage analysis across multiple VMs")]
-#[command(version = "1.0.0")]
+#[command(version = "1.0.1")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -80,7 +87,17 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Load configuration first (this also validates it)
+    get_config();
+    
+    // Initialize logging with config
+    logging::init_logging();
+    
+    // Initialize memory monitoring with config
+    memory::init_memory_limit();
+    
     let cli = Cli::parse();
+    
     
     // Handle command with its specific options
     match cli.command.unwrap_or(Commands::Daily {
@@ -186,8 +203,10 @@ fn parse_common_args(
 
 fn handle_error(e: anyhow::Error, json: bool) -> Result<(), anyhow::Error> {
     if json {
+        error!(error = %e, "Command failed");
         println!("{{\"error\": \"{}\"}}", e);
     } else {
+        error!(error = %e, "Command failed");
         eprintln!("Error: {}", e);
     }
     Err(e)
