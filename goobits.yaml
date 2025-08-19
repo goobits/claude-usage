@@ -55,7 +55,7 @@ messages:
 
 cli:
   name: "Claude Usage"
-  version: "1.0.0"
+  version: "1.0.1"
   display_version: true
   tagline: "Fast Rust implementation for Claude usage analysis across multiple VMs"
   description: "Analyze Claude AI usage across multiple VMs with detailed breakdowns by project, session, and time period."

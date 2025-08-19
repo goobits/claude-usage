@@ -121,22 +121,22 @@ The tests use realistic patterns based on actual Claude Desktop JSONL files:
 
 ### Pattern 1: Full Featured Entry
 ```json
-{"timestamp":"2024-01-15T10:30:00Z","message":{"id":"msg_1","model":"claude-3-5-sonnet-20241022","usage":{"input_tokens":100,"output_tokens":200,"cache_creation_input_tokens":5,"cache_read_input_tokens":10}},"costUSD":0.005,"requestId":"req_1"}
+{"timestamp":"2025-01-15T10:30:00Z","message":{"id":"msg_1","model":"claude-3-5-sonnet-20241022","usage":{"input_tokens":100,"output_tokens":200,"cache_creation_input_tokens":5,"cache_read_input_tokens":10}},"costUSD":0.005,"requestId":"req_1"}
 ```
 
 ### Pattern 2: Alternative Field Names
 ```json
-{"timestamp":"2024-01-15T10:31:00Z","message":{"id":"msg_2","model":"claude-3-5-sonnet-20241022","usage":{"input_tokens":150,"output_tokens":250}},"cost_usd":0.004,"request_id":"req_2"}
+{"timestamp":"2025-01-15T10:31:00Z","message":{"id":"msg_2","model":"claude-3-5-sonnet-20241022","usage":{"input_tokens":150,"output_tokens":250}},"cost_usd":0.004,"request_id":"req_2"}
 ```
 
 ### Pattern 3: Minimal Entry
 ```json
-{"timestamp":"2024-01-15T10:32:00Z","message":{"id":"msg_3","model":"claude-3-5-sonnet-20241022"},"requestId":"req_3"}
+{"timestamp":"2025-01-15T10:32:00Z","message":{"id":"msg_3","model":"claude-3-5-sonnet-20241022"},"requestId":"req_3"}
 ```
 
 ### Pattern 4: Schema Evolution
 ```json
-{"timestamp":"2024-01-15T10:33:00Z","message":{"id":"msg_4","model":"claude-3-5-sonnet-20241022","usage":{"inputTokens":200,"outputTokens":300}},"cost":0.005,"req_id":"req_4","newField":"future_value"}
+{"timestamp":"2025-01-15T10:33:00Z","message":{"id":"msg_4","model":"claude-3-5-sonnet-20241022","usage":{"inputTokens":200,"outputTokens":300}},"cost":0.005,"req_id":"req_4","newField":"future_value"}
 ```
 
 ## Mock Directory Structure

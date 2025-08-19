@@ -1,5 +1,5 @@
 use anyhow::Result;
-use chrono::{DateTime, Utc, NaiveDateTime};
+use chrono::{DateTime, NaiveDateTime, Utc};
 
 /// Handles parsing timestamps from various formats used in Claude usage data
 pub struct TimestampParser;
@@ -14,17 +14,17 @@ impl TimestampParser {
         } else {
             timestamp_str.to_string()
         };
-        
+
         // Try parsing as ISO 8601
         if let Ok(dt) = DateTime::parse_from_rfc3339(&timestamp) {
             return Ok(dt.with_timezone(&Utc));
         }
-        
+
         // Try parsing as naive datetime and assume UTC
         if let Ok(naive) = NaiveDateTime::parse_from_str(&timestamp, "%Y-%m-%dT%H:%M:%S%.f") {
             return Ok(DateTime::from_naive_utc_and_offset(naive, Utc));
         }
-        
+
         anyhow::bail!("Failed to parse timestamp: {}", timestamp_str)
     }
 }

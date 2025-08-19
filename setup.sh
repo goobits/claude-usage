@@ -8,7 +8,7 @@ set -e  # Exit on error
 PACKAGE_NAME="claude-usage"
 COMMAND_NAME="claude-usage"
 DISPLAY_NAME="Claude Usage Analytics"
-VERSION="1.0.0"
+VERSION="1.0.1"
 DESCRIPTION="Fast Rust implementation for Claude usage analysis across multiple VMs"
 
 # Color codes for output

@@ -2,7 +2,7 @@
 # Copy to claude-usage.toml or ~/.config/claude-usage/config.toml
 
 [logging]
-level = "INFO"           # DEBUG, INFO, WARN, ERROR
+level = "WARN"           # DEBUG, INFO, WARN, ERROR
 format = "pretty"        # pretty, json
 output = "console"       # console, file, both
 

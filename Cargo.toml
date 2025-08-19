@@ -50,7 +50,6 @@ dashmap = "5.5"
 rayon = "1.8"
 
 # Utilities
-libloading = "0.8"
 regex = "1.10"
 reqwest = { version = "0.11", features = ["json"] }
 

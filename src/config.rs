@@ -6,11 +6,11 @@
 //! - Runtime defaults
 //! - Validation and type safety
 
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::env;
-use std::path::{Path, PathBuf};
 use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use tracing::{info, warn};
 
@@ -19,19 +19,19 @@ use tracing::{info, warn};
 pub struct Config {
     /// Logging configuration
     pub logging: LoggingConfig,
-    
+
     /// Processing configuration
     pub processing: ProcessingConfig,
-    
+
     /// Memory configuration
     pub memory: MemoryConfig,
-    
+
     /// Deduplication configuration
     pub dedup: DedupConfig,
-    
+
     /// Output configuration
     pub output: OutputConfig,
-    
+
     /// Paths configuration
     pub paths: PathsConfig,
 }
@@ -126,7 +126,7 @@ impl Config {
     /// Load configuration from environment, file, and defaults
     pub fn load() -> Result<Self> {
         let mut config = Config::default();
-        
+
         // Try to load from config file if it exists
         let config_paths = [
             PathBuf::from("claude-usage.toml"),
@@ -135,7 +135,7 @@ impl Config {
                 .map(|d| d.join("claude-usage").join("config.toml"))
                 .unwrap_or_default(),
         ];
-        
+
         for path in &config_paths {
             if path.exists() {
                 info!(config_file = %path.display(), "Loading configuration from file");
@@ -143,27 +143,27 @@ impl Config {
                 break;
             }
         }
-        
+
         // Override with environment variables
         config.apply_env_overrides()?;
-        
+
         // Validate configuration
         config.validate()?;
-        
+
         Ok(config)
     }
-    
+
     /// Load configuration from TOML file
     pub fn load_from_file(path: &Path) -> Result<Self> {
         let content = fs::read_to_string(path)
             .with_context(|| format!("Failed to read config file: {}", path.display()))?;
-        
+
         let config: Config = toml::from_str(&content)
             .with_context(|| format!("Failed to parse config file: {}", path.display()))?;
-        
+
         Ok(config)
     }
-    
+
     /// Apply environment variable overrides
     pub fn apply_env_overrides(&mut self) -> Result<()> {
         // Logging overrides
@@ -176,37 +176,37 @@ impl Config {
         if let Ok(val) = env::var("LOG_OUTPUT") {
             self.logging.output = val;
         }
-        
+
         // Processing overrides
         if let Ok(val) = env::var("CLAUDE_USAGE_BATCH_SIZE") {
-            self.processing.batch_size = val.parse()
-                .context("Invalid CLAUDE_USAGE_BATCH_SIZE")?;
+            self.processing.batch_size = val.parse().context("Invalid CLAUDE_USAGE_BATCH_SIZE")?;
         }
         if let Ok(val) = env::var("CLAUDE_USAGE_PARALLEL_CHUNKS") {
-            self.processing.parallel_chunks = val.parse()
+            self.processing.parallel_chunks = val
+                .parse()
                 .context("Invalid CLAUDE_USAGE_PARALLEL_CHUNKS")?;
         }
-        
+
         // Memory overrides
         if let Ok(val) = env::var("CLAUDE_USAGE_MAX_MEMORY_MB") {
-            self.memory.max_memory_mb = val.parse()
-                .context("Invalid CLAUDE_USAGE_MAX_MEMORY_MB")?;
+            self.memory.max_memory_mb =
+                val.parse().context("Invalid CLAUDE_USAGE_MAX_MEMORY_MB")?;
         }
         if let Ok(val) = env::var("CLAUDE_USAGE_BUFFER_SIZE_KB") {
-            self.memory.buffer_size_kb = val.parse()
-                .context("Invalid CLAUDE_USAGE_BUFFER_SIZE_KB")?;
+            self.memory.buffer_size_kb =
+                val.parse().context("Invalid CLAUDE_USAGE_BUFFER_SIZE_KB")?;
         }
-        
+
         // Dedup overrides
         if let Ok(val) = env::var("CLAUDE_USAGE_DEDUP_WINDOW_HOURS") {
-            self.dedup.window_hours = val.parse()
+            self.dedup.window_hours = val
+                .parse()
                 .context("Invalid CLAUDE_USAGE_DEDUP_WINDOW_HOURS")?;
         }
         if let Ok(val) = env::var("CLAUDE_USAGE_DEDUP_ENABLED") {
-            self.dedup.enabled = val.parse()
-                .context("Invalid CLAUDE_USAGE_DEDUP_ENABLED")?;
+            self.dedup.enabled = val.parse().context("Invalid CLAUDE_USAGE_DEDUP_ENABLED")?;
         }
-        
+
         // Path overrides
         if let Ok(val) = env::var("CLAUDE_HOME") {
             self.paths.claude_home = PathBuf::from(val);
@@ -217,10 +217,10 @@ impl Config {
         if let Ok(val) = env::var("CLAUDE_LOG_DIR") {
             self.paths.log_directory = PathBuf::from(val);
         }
-        
+
         Ok(())
     }
-    
+
     /// Validate configuration values
     pub fn validate(&self) -> Result<()> {
         // Validate memory settings
@@ -230,48 +230,47 @@ impl Config {
                 "Memory limit is very low, may cause performance issues"
             );
         }
-        
+
         if self.memory.buffer_size_kb < 1 || self.memory.buffer_size_kb > 1024 {
             return Err(anyhow::anyhow!(
                 "Buffer size must be between 1KB and 1024KB, got {}KB",
                 self.memory.buffer_size_kb
             ));
         }
-        
+
         // Validate processing settings
         if self.processing.batch_size == 0 {
             return Err(anyhow::anyhow!("Batch size must be greater than 0"));
         }
-        
+
         if self.processing.parallel_chunks == 0 {
             return Err(anyhow::anyhow!("Parallel chunks must be greater than 0"));
         }
-        
+
         // Validate dedup settings
         if self.dedup.window_hours < 0 {
             return Err(anyhow::anyhow!("Dedup window hours cannot be negative"));
         }
-        
+
         // Validate paths exist (create if needed)
         if !self.paths.log_directory.exists() {
             fs::create_dir_all(&self.paths.log_directory)
                 .context("Failed to create log directory")?;
         }
-        
+
         Ok(())
     }
-    
+
     /// Save current configuration to file
     #[allow(dead_code)]
     pub fn save_to_file(&self, path: &Path) -> Result<()> {
-        let content = toml::to_string_pretty(self)
-            .context("Failed to serialize configuration")?;
-        
+        let content = toml::to_string_pretty(self).context("Failed to serialize configuration")?;
+
         fs::write(path, content)
             .with_context(|| format!("Failed to write config file: {}", path.display()))?;
-        
+
         info!(path = %path.display(), "Configuration saved to file");
-        
+
         Ok(())
     }
 }
@@ -281,15 +280,13 @@ static CONFIG: OnceLock<Config> = OnceLock::new();
 
 /// Get the global configuration instance
 pub fn get_config() -> &'static Config {
-    CONFIG.get_or_init(|| {
-        Config::load().expect("Failed to load configuration")
-    })
+    CONFIG.get_or_init(|| Config::load().expect("Failed to load configuration"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_default_config() {
         let config = Config::default();
@@ -297,7 +294,7 @@ mod tests {
         assert_eq!(config.processing.batch_size, 10);
         assert_eq!(config.memory.max_memory_mb, 512);
     }
-    
+
     #[test]
     fn test_env_override() {
         env::set_var("CLAUDE_USAGE_BATCH_SIZE", "20");
@@ -306,7 +303,7 @@ mod tests {
         assert_eq!(config.processing.batch_size, 20);
         env::remove_var("CLAUDE_USAGE_BATCH_SIZE");
     }
-    
+
     #[test]
     fn test_validation() {
         let mut config = Config::default();

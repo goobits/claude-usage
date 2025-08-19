@@ -1,29 +1,29 @@
 // Debug script to check file discovery
 // Run with: cargo run --example debug_files
 
-use claude_usage::parser::FileParser;
 use anyhow::Result;
+use claude_usage::parser::FileParser;
 
 fn main() -> Result<()> {
     let parser = FileParser::new();
-    
+
     println!("🔍 Debugging file discovery...\n");
-    
+
     // Step 1: Discover Claude paths
     let claude_paths = parser.discover_claude_paths(false)?;
     println!("Claude instances found: {}", claude_paths.len());
     for (i, path) in claude_paths.iter().enumerate() {
         println!("  {}: {}", i + 1, path.display());
     }
-    
+
     // Step 2: Find JSONL files
     println!("\nSearching for JSONL files...");
     let file_tuples = parser.find_jsonl_files(&claude_paths)?;
     println!("Total JSONL files found: {}", file_tuples.len());
-    
+
     if file_tuples.is_empty() {
         println!("\n⚠️  No JSONL files found!");
-        
+
         // Let's check manually
         use std::fs;
         println!("\nManual check of ~/.claude/projects:");
@@ -35,13 +35,15 @@ fn main() -> Result<()> {
                     for entry in entries.flatten() {
                         if entry.path().is_dir() {
                             println!("  Dir: {}", entry.file_name().to_string_lossy());
-                            
+
                             // Check for conversation files
                             if let Ok(files) = fs::read_dir(entry.path()) {
                                 for file in files.flatten() {
                                     let name = file.file_name();
                                     let name_str = name.to_string_lossy();
-                                    if name_str.starts_with("conversation_") && name_str.ends_with(".jsonl") {
+                                    if name_str.starts_with("conversation_")
+                                        && name_str.ends_with(".jsonl")
+                                    {
                                         count += 1;
                                         if count <= 5 {
                                             println!("    -> {}", name_str);
@@ -66,7 +68,7 @@ fn main() -> Result<()> {
                 println!("     Session: {}", session_name.to_string_lossy());
             }
         }
-        
+
         // Check file dates
         println!("\nChecking file modification times:");
         use std::fs;
@@ -74,7 +76,8 @@ fn main() -> Result<()> {
             if let Ok(metadata) = fs::metadata(file_path) {
                 if let Ok(modified) = metadata.modified() {
                     let datetime = chrono::DateTime::<chrono::Utc>::from(modified);
-                    println!("  {} - Modified: {}", 
+                    println!(
+                        "  {} - Modified: {}",
                         file_path.file_name().unwrap_or_default().to_string_lossy(),
                         datetime.format("%Y-%m-%d %H:%M:%S")
                     );
@@ -82,6 +85,6 @@ fn main() -> Result<()> {
             }
         }
     }
-    
+
     Ok(())
 }

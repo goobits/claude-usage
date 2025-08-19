@@ -1,25 +1,26 @@
 //! Memory monitoring and management utilities
-//! 
+//!
 //! This module provides enhanced memory tracking and pressure management
 //! with atomic-based tracking and adaptive sizing capabilities.
 
 use crate::config::get_config;
+use anyhow::Result;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
-use tracing::{warn, error};
-use anyhow::Result;
+use tracing::{debug, error, warn};
 
 /// Global memory tracking state
 static MEMORY_LIMIT: AtomicUsize = AtomicUsize::new(0);
 static CURRENT_USAGE: AtomicUsize = AtomicUsize::new(0);
 static MEMORY_INITIALIZED: OnceLock<()> = OnceLock::new();
+static LAST_WARNING_TIME: AtomicUsize = AtomicUsize::new(0);
 
 /// Memory pressure levels for adaptive behavior
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MemoryPressureLevel {
-    Low,    // < 50% of limit
-    Normal, // 50-75% of limit
-    High,   // 75-90% of limit
+    Low,      // < 50% of limit
+    Normal,   // 50-75% of limit
+    High,     // 75-90% of limit
     Critical, // > 90% of limit
 }
 
@@ -35,9 +36,9 @@ pub struct MemoryStats {
 pub fn init_memory_limit() {
     let config = get_config();
     let limit_bytes = config.memory.max_memory_mb * 1_000_000;
-    
+
     MEMORY_LIMIT.store(limit_bytes, Ordering::Relaxed);
-    
+
     if MEMORY_INITIALIZED.set(()).is_err() {
         error!("Failed to initialize memory limit - already initialized");
     }
@@ -58,18 +59,28 @@ fn ensure_initialized() {
 pub fn check_memory_pressure() -> bool {
     ensure_initialized();
     let pressure = get_pressure_level();
-    
+
     match pressure {
         MemoryPressureLevel::Low | MemoryPressureLevel::Normal => false,
         MemoryPressureLevel::High | MemoryPressureLevel::Critical => {
-            let stats = get_memory_stats();
-            warn!(
-                current_mb = stats.current_usage / 1_000_000,
-                limit_mb = stats.memory_limit / 1_000_000,
-                usage_pct = stats.usage_percentage,
-                pressure_level = ?pressure,
-                "Memory pressure detected"
-            );
+            // Throttle warnings to once every 5 seconds
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as usize;
+            
+            let last_warning = LAST_WARNING_TIME.load(Ordering::Relaxed);
+            if now > last_warning + 5 {
+                let stats = get_memory_stats();
+                warn!(
+                    current_mb = stats.current_usage / 1_000_000,
+                    limit_mb = stats.memory_limit / 1_000_000,
+                    usage_pct = stats.usage_percentage,
+                    pressure_level = ?pressure,
+                    "Memory pressure detected"
+                );
+                LAST_WARNING_TIME.store(now, Ordering::Relaxed);
+            }
             true
         }
     }
@@ -80,9 +91,9 @@ pub fn track_allocation(bytes: usize) {
     ensure_initialized();
     let limit = MEMORY_LIMIT.load(Ordering::Relaxed);
     let new_usage = CURRENT_USAGE.fetch_add(bytes, Ordering::Relaxed) + bytes;
-    
+
     if new_usage > limit {
-        warn!(
+        debug!(
             bytes = bytes,
             new_usage_mb = new_usage / 1_000_000,
             limit_mb = limit / 1_000_000,
@@ -101,6 +112,7 @@ pub fn track_deallocation(bytes: usize) {
 }
 
 /// Get current memory usage estimate in MB (backward compatibility)
+#[allow(dead_code)]
 pub fn get_memory_usage_mb() -> usize {
     ensure_initialized();
     CURRENT_USAGE.load(Ordering::Relaxed) / 1_000_000
@@ -113,12 +125,12 @@ pub fn get_memory_usage_mb() -> usize {
 pub fn get_adaptive_batch_size(default_size: usize) -> usize {
     ensure_initialized();
     let pressure = get_pressure_level();
-    
+
     match pressure {
         MemoryPressureLevel::Low => default_size,
-        MemoryPressureLevel::Normal => (default_size * 3) / 4,  // 75% of default
-        MemoryPressureLevel::High => default_size / 2,          // 50% of default
-        MemoryPressureLevel::Critical => default_size / 4,      // 25% of default
+        MemoryPressureLevel::Normal => (default_size * 3) / 4, // 75% of default
+        MemoryPressureLevel::High => default_size / 2,         // 50% of default
+        MemoryPressureLevel::Critical => default_size / 4,     // 25% of default
     }
 }
 
@@ -132,7 +144,7 @@ pub fn get_memory_stats() -> MemoryStats {
     } else {
         0.0
     };
-    
+
     MemoryStats {
         current_usage: current,
         memory_limit: limit,
@@ -151,13 +163,13 @@ pub fn get_pressure_level() -> MemoryPressureLevel {
     ensure_initialized();
     let current = CURRENT_USAGE.load(Ordering::Relaxed);
     let limit = MEMORY_LIMIT.load(Ordering::Relaxed);
-    
+
     if limit == 0 {
         return MemoryPressureLevel::Low;
     }
-    
+
     let usage_ratio = current as f64 / limit as f64;
-    
+
     match usage_ratio {
         r if r < 0.5 => MemoryPressureLevel::Low,
         r if r < 0.75 => MemoryPressureLevel::Normal,
@@ -177,7 +189,7 @@ pub fn try_gc_if_needed() -> Result<()> {
             std::hint::black_box(());
             Ok(())
         }
-        _ => Ok(())
+        _ => Ok(()),
     }
 }
 
@@ -189,7 +201,7 @@ mod tests {
     fn test_memory_manager_initialization() {
         // Test that we can initialize and use the memory manager
         init_memory_limit();
-        
+
         // Should not panic and should return valid stats
         let stats = get_memory_stats();
         assert!(stats.memory_limit > 0);
@@ -200,19 +212,19 @@ mod tests {
     fn test_backward_compatibility() {
         // Test that legacy API still works
         init_memory_limit();
-        
+
         // Track some allocations
         track_allocation(1024);
         track_allocation(2048);
-        
+
         // Should be able to get usage
         let usage_mb = get_memory_usage_mb();
-        assert!(usage_mb >= 0);
-        
+        // usage_mb is usize and always >= 0, so assertion is redundant
+
         // Should be able to check pressure
         let has_pressure = check_memory_pressure();
-        assert!(has_pressure == true || has_pressure == false); // Just ensure it doesn't panic
-        
+        // Boolean value is always true or false, assertion is redundant
+
         // Track deallocations
         track_deallocation(1024);
         track_deallocation(2048);
@@ -221,10 +233,10 @@ mod tests {
     #[test]
     fn test_adaptive_batch_size() {
         init_memory_limit();
-        
+
         let default_size = 1000;
         let adaptive_size = get_adaptive_batch_size(default_size);
-        
+
         // Adaptive size should be reasonable
         assert!(adaptive_size > 0);
         assert!(adaptive_size <= default_size * 10); // Sanity check
@@ -233,23 +245,24 @@ mod tests {
     #[test]
     fn test_spill_to_disk_decision() {
         init_memory_limit();
-        
+
         // Should return a boolean without panicking
         let should_spill = should_spill_to_disk();
-        assert!(should_spill == true || should_spill == false);
+        // Boolean value is always true or false, assertion is redundant
     }
 
     #[test]
     fn test_pressure_level() {
         init_memory_limit();
-        
+
         let pressure = get_pressure_level();
         // Should be one of the valid pressure levels
-        matches!(pressure, 
-            MemoryPressureLevel::Low | 
-            MemoryPressureLevel::Normal | 
-            MemoryPressureLevel::High | 
-            MemoryPressureLevel::Critical
+        matches!(
+            pressure,
+            MemoryPressureLevel::Low
+                | MemoryPressureLevel::Normal
+                | MemoryPressureLevel::High
+                | MemoryPressureLevel::Critical
         );
     }
 }

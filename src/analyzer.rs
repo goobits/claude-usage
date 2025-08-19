@@ -72,12 +72,12 @@
 //! - **Intelligent Caching**: Deduplication engine maintains time-windowed caches
 //! - **Early Exit Optimization**: Can stop processing early when limits are reached
 
-use crate::models::*;
-use crate::parser_wrapper::UnifiedParser;
-use crate::parser::FileParser;
 use crate::dedup::{DeduplicationEngine, ProcessOptions};
 use crate::display::DisplayManager;
+use crate::models::*;
 use crate::monitor::LiveMonitor;
+use crate::parser::FileParser;
+use crate::parser_wrapper::UnifiedParser;
 use anyhow::Result;
 use tracing::warn;
 
@@ -106,56 +106,79 @@ impl ClaudeUsageAnalyzer {
         }
     }
 
-    pub async fn aggregate_data(&self, _command: &str, options: ProcessOptions) -> Result<Vec<SessionOutput>> {
+    pub async fn aggregate_data(
+        &self,
+        _command: &str,
+        options: ProcessOptions,
+    ) -> Result<Vec<SessionOutput>> {
         // Discover Claude paths - use file_parser for discovery
-        let paths = self.file_parser.discover_claude_paths(options.exclude_vms)?;
-        
-        
+        let paths = self
+            .file_parser
+            .discover_claude_paths(options.exclude_vms)?;
+
         if !options.json_output {
-            println!("🔍 Discovered {} Claude instance{}", paths.len(), if paths.len() == 1 { "" } else { "s" });
+            println!(
+                "🔍 Discovered {} Claude instance{}",
+                paths.len(),
+                if paths.len() == 1 { "" } else { "s" }
+            );
         }
-        
+
         // Find all JSONL files - use file_parser for discovery
         let mut all_jsonl_files = Vec::new();
         let mut files_filtered = 0;
-        
+
         for claude_path in &paths {
-            let file_tuples = self.file_parser.find_jsonl_files(&[claude_path.clone()])?;
-            
+            let file_tuples = self.file_parser.find_jsonl_files(std::slice::from_ref(claude_path))?;
+
             for (jsonl_file, session_dir) in file_tuples {
                 // Pre-filter files by date range - use file_parser for filtering
-                if self.file_parser.should_include_file(&jsonl_file, options.since_date.as_ref(), options.until_date.as_ref()) {
+                if self.file_parser.should_include_file(
+                    &jsonl_file,
+                    options.since_date.as_ref(),
+                    options.until_date.as_ref(),
+                ) {
                     all_jsonl_files.push((jsonl_file, session_dir));
                 } else {
                     files_filtered += 1;
                 }
             }
         }
-        
-        
+
         if !options.json_output {
             if files_filtered > 0 {
-                println!("📁 Found {} JSONL files (filtered out {} by date)", all_jsonl_files.len(), files_filtered);
+                println!(
+                    "📁 Found {} JSONL files (filtered out {} by date)",
+                    all_jsonl_files.len(),
+                    files_filtered
+                );
             } else {
-                println!("📁 Found {} JSONL files across all instances", all_jsonl_files.len());
+                println!(
+                    "📁 Found {} JSONL files across all instances",
+                    all_jsonl_files.len()
+                );
             }
         }
-        
+
         // Sort files by timestamp - use file_parser for sorting
         let sorted_files = self.file_parser.sort_files_by_timestamp(all_jsonl_files);
-        
+
         // Pass UnifiedParser to dedup engine
-        self.dedup_engine.process_files_with_global_dedup(sorted_files, &options, &self.parser).await
+        self.dedup_engine
+            .process_files_with_global_dedup(sorted_files, &options, &self.parser)
+            .await
     }
 
     pub async fn run_command(&mut self, command: &str, options: ProcessOptions) -> Result<()> {
         match command {
             "live" => {
-                self.live_monitor.run_live_monitor(options.json_output, options.snapshot, options.exclude_vms).await
+                self.live_monitor
+                    .run_live_monitor(options.json_output, options.snapshot, options.exclude_vms)
+                    .await
             }
             _ => {
                 let data = self.aggregate_data(command, options.clone()).await?;
-                
+
                 if data.is_empty() {
                     warn!("No Claude usage data found across all instances");
                     if options.json_output {
@@ -165,15 +188,23 @@ impl ClaudeUsageAnalyzer {
                     }
                     return Ok(());
                 }
-                
+
                 match command {
-                    "daily" => self.display_manager.display_daily(&data, options.limit, options.json_output),
-                    "monthly" => self.display_manager.display_monthly(&data, options.limit, options.json_output),
+                    "daily" => self.display_manager.display_daily(
+                        &data,
+                        options.limit,
+                        options.json_output,
+                    ),
+                    "monthly" => self.display_manager.display_monthly(
+                        &data,
+                        options.limit,
+                        options.json_output,
+                    ),
                     _ => {
                         anyhow::bail!("Unknown command: {}", command);
                     }
                 }
-                
+
                 Ok(())
             }
         }

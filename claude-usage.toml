@@ -1,7 +1,7 @@
 # Claude Usage Configuration File for Testing
 
 [logging]
-level = "INFO"
+level = "WARN"
 format = "pretty"
 output = "console"
 
@@ -12,7 +12,7 @@ max_retries = 3
 progress_interval_mb = 10
 
 [memory]
-max_memory_mb = 128
+max_memory_mb = 512
 buffer_size_kb = 4
 warning_threshold_pct = 80
 

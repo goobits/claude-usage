@@ -1,9 +1,9 @@
+use crate::keeper_integration::KeeperIntegration;
+use crate::models::*;
 use anyhow::Result;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
-use crate::models::*;
-use crate::keeper_integration::KeeperIntegration;
 
 /// Handles session-related utilities including session ID extraction and session blocks parsing
 pub struct SessionUtils;
@@ -13,14 +13,14 @@ impl SessionUtils {
     /// Returns (session_id, project_name)
     pub fn extract_session_info(session_dir_name: &str) -> (String, String) {
         let session_id = session_dir_name.to_string();
-        
-        let project_name = if session_dir_name.starts_with('-') {
+
+        let project_name = if let Some(stripped) = session_dir_name.strip_prefix('-') {
             // Remove only the leading dash, keep the full path
-            session_dir_name[1..].to_string()
+            stripped.to_string()
         } else {
             session_dir_name.to_string()
         };
-        
+
         (session_id, project_name)
     }
 
@@ -29,27 +29,29 @@ impl SessionUtils {
     pub fn create_unique_hash(entry: &UsageEntry) -> Option<String> {
         let message_id = &entry.message.id;
         let request_id = &entry.request_id;
-        
+
         if message_id.is_empty() || request_id.is_empty() {
             return None;
         }
-        
+
         Some(format!("{}:{}", message_id, request_id))
     }
 
     /// Parse a session blocks file and return the session blocks
-    pub fn parse_session_blocks_file(file_path: &Path, keeper: &KeeperIntegration) -> Result<Vec<SessionBlock>> {
-        
+    pub fn parse_session_blocks_file(
+        file_path: &Path,
+        keeper: &KeeperIntegration,
+    ) -> Result<Vec<SessionBlock>> {
         let file = File::open(file_path)?;
         let reader = BufReader::new(file);
-        
+
         // For JSON files, we need to accumulate lines
         let mut content = String::new();
         for line in reader.lines() {
             content.push_str(&line?);
             content.push('\n');
         }
-        
+
         keeper.parse_session_blocks(&content)
     }
 }
@@ -84,7 +86,7 @@ mod tests {
             timestamp: "2024-01-01T12:00:00Z".to_string(),
             cost_usd: None,
         };
-        
+
         let hash = SessionUtils::create_unique_hash(&entry);
         assert_eq!(hash, Some("msg123:req456".to_string()));
     }
@@ -101,7 +103,7 @@ mod tests {
             timestamp: "2024-01-01T12:00:00Z".to_string(),
             cost_usd: None,
         };
-        
+
         let hash = SessionUtils::create_unique_hash(&entry);
         assert_eq!(hash, None);
     }

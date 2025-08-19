@@ -1,32 +1,31 @@
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use anyhow::{Result, Context};
 use tracing::error;
 
-mod models;
-mod parser;
-mod parser_wrapper;
-mod keeper_integration;
-mod file_discovery;
-mod timestamp_parser;
-mod session_utils;
-mod dedup;
 mod analyzer;
+mod config;
+mod dedup;
 mod display;
-mod monitor;
-mod pricing;
+mod file_discovery;
+mod keeper_integration;
 mod logging;
 mod memory;
-mod config;
-
+mod models;
+mod monitor;
+mod parser;
+mod parser_wrapper;
+mod pricing;
+mod session_utils;
+mod timestamp_parser;
 
 use analyzer::ClaudeUsageAnalyzer;
-use dedup::ProcessOptions;
 use config::get_config;
+use dedup::ProcessOptions;
 
 #[derive(Parser)]
 #[command(name = "claude-usage")]
 #[command(about = "Fast Rust implementation for Claude usage analysis across multiple VMs")]
-#[command(version = "1.0.1")]
+#[command(version = env!("CARGO_PKG_VERSION"))]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -84,21 +83,19 @@ enum Commands {
     },
 }
 
-
 #[tokio::main]
 async fn main() -> Result<()> {
     // Load configuration first (this also validates it)
     get_config();
-    
+
     // Initialize logging with config
     logging::init_logging();
-    
+
     // Initialize memory monitoring with config
     memory::init_memory_limit();
-    
+
     let cli = Cli::parse();
-    
-    
+
     // Handle command with its specific options
     match cli.command.unwrap_or(Commands::Daily {
         json: false,
@@ -107,29 +104,47 @@ async fn main() -> Result<()> {
         until: None,
         exclude_vms: false,
     }) {
-        Commands::Daily { json, limit, since, until, exclude_vms } => {
-            let (_since_date, _until_date, mut analyzer, options) = 
+        Commands::Daily {
+            json,
+            limit,
+            since,
+            until,
+            exclude_vms,
+        } => {
+            let (_since_date, _until_date, mut analyzer, options) =
                 parse_common_args(json, limit, since, until, "daily", exclude_vms)?;
-            
+
             match analyzer.run_command("daily", options).await {
                 Ok(_) => Ok(()),
                 Err(e) => handle_error(e, json),
             }
         }
-        Commands::Monthly { json, limit, since, until, exclude_vms } => {
-            let (_since_date, _until_date, mut analyzer, options) = 
+        Commands::Monthly {
+            json,
+            limit,
+            since,
+            until,
+            exclude_vms,
+        } => {
+            let (_since_date, _until_date, mut analyzer, options) =
                 parse_common_args(json, limit, since, until, "monthly", exclude_vms)?;
-            
+
             match analyzer.run_command("monthly", options).await {
                 Ok(_) => Ok(()),
                 Err(e) => handle_error(e, json),
             }
         }
-        Commands::Live { json, snapshot, exclude_vms } => {
+        Commands::Live {
+            json,
+            snapshot,
+            exclude_vms,
+        } => {
             if json && !snapshot {
-                return Err(anyhow::anyhow!("Live monitoring does not support --json output"));
+                return Err(anyhow::anyhow!(
+                    "Live monitoring does not support --json output"
+                ));
             }
-            
+
             let mut analyzer = ClaudeUsageAnalyzer::new();
             let options = ProcessOptions {
                 command: "live".to_string(),
@@ -140,7 +155,7 @@ async fn main() -> Result<()> {
                 snapshot,
                 exclude_vms,
             };
-            
+
             match analyzer.run_command("live", options).await {
                 Ok(_) => Ok(()),
                 Err(e) => handle_error(e, json),
@@ -156,37 +171,52 @@ fn parse_common_args(
     until: Option<String>,
     command: &str,
     exclude_vms: bool,
-) -> Result<(Option<chrono::DateTime<chrono::Utc>>, Option<chrono::DateTime<chrono::Utc>>, ClaudeUsageAnalyzer, ProcessOptions)> {
+) -> Result<(
+    Option<chrono::DateTime<chrono::Utc>>,
+    Option<chrono::DateTime<chrono::Utc>>,
+    ClaudeUsageAnalyzer,
+    ProcessOptions,
+)> {
     // Parse date filters
     let since_date = if let Some(since_str) = since {
         match chrono::NaiveDate::parse_from_str(&since_str, "%Y-%m-%d") {
-            Ok(date) => Some(date.and_hms_opt(0, 0, 0)
-                .context("Failed to create time from date")?.
-                and_utc()),
+            Ok(date) => Some(
+                date.and_hms_opt(0, 0, 0)
+                    .context("Failed to create time from date")?
+                    .and_utc(),
+            ),
             Err(_) => {
-                return Err(anyhow::anyhow!("Invalid since date format: {}. Use YYYY-MM-DD", since_str));
+                return Err(anyhow::anyhow!(
+                    "Invalid since date format: {}. Use YYYY-MM-DD",
+                    since_str
+                ));
             }
         }
     } else {
         None
     };
-    
+
     let until_date = if let Some(until_str) = until {
         match chrono::NaiveDate::parse_from_str(&until_str, "%Y-%m-%d") {
-            Ok(date) => Some(date.and_hms_opt(23, 59, 59)
-                .context("Failed to create time from date")?.
-                and_utc()),
+            Ok(date) => Some(
+                date.and_hms_opt(23, 59, 59)
+                    .context("Failed to create time from date")?
+                    .and_utc(),
+            ),
             Err(_) => {
-                return Err(anyhow::anyhow!("Invalid until date format: {}. Use YYYY-MM-DD", until_str));
+                return Err(anyhow::anyhow!(
+                    "Invalid until date format: {}. Use YYYY-MM-DD",
+                    until_str
+                ));
             }
         }
     } else {
         None
     };
-    
+
     // Create analyzer
     let analyzer = ClaudeUsageAnalyzer::new();
-    
+
     // Build options
     let options = ProcessOptions {
         command: command.to_string(),
@@ -197,7 +227,7 @@ fn parse_common_args(
         snapshot: false,
         exclude_vms,
     };
-    
+
     Ok((since_date, until_date, analyzer, options))
 }
 

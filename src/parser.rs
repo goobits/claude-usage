@@ -79,11 +79,11 @@
 //! - [`SessionUtils`] for session management utilities
 //! - Main analysis pipeline through [`crate::analyzer::ClaudeUsageAnalyzer`]
 
-use crate::models::*;
 use crate::file_discovery::FileDiscovery;
-use crate::timestamp_parser::TimestampParser;
-use crate::session_utils::SessionUtils;
 use crate::keeper_integration::KeeperIntegration;
+use crate::models::*;
+use crate::session_utils::SessionUtils;
+use crate::timestamp_parser::TimestampParser;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use std::fs::File;
@@ -99,7 +99,7 @@ pub struct FileParser {
 #[allow(dead_code)]
 pub trait JsonlProcessor {
     type Output;
-    
+
     fn process_entry(&mut self, entry: UsageEntry, line_number: usize) -> Result<()>;
     fn finalize(self) -> Result<Self::Output>;
 }
@@ -121,7 +121,7 @@ impl ProcessedEntry {
         let timestamp = parser.parse_timestamp(&entry.timestamp)?;
         let date = timestamp.format("%Y-%m-%d").to_string();
         let total_tokens = Self::calculate_total_tokens(&entry);
-        
+
         Ok(Self {
             entry,
             timestamp,
@@ -130,41 +130,49 @@ impl ProcessedEntry {
             total_tokens,
         })
     }
-    
+
     fn calculate_total_tokens(entry: &UsageEntry) -> u32 {
         if let Some(usage) = &entry.message.usage {
-            usage.input_tokens + 
-            usage.output_tokens + 
-            usage.cache_creation_input_tokens + 
-            usage.cache_read_input_tokens
+            usage.input_tokens
+                + usage.output_tokens
+                + usage.cache_creation_input_tokens
+                + usage.cache_read_input_tokens
         } else {
             0
         }
     }
-    
+
     pub fn input_tokens(&self) -> u32 {
-        self.entry.message.usage.as_ref()
+        self.entry
+            .message
+            .usage
+            .as_ref()
             .map(|u| u.input_tokens)
             .unwrap_or(0)
     }
-    
+
     pub fn output_tokens(&self) -> u32 {
-        self.entry.message.usage.as_ref()
+        self.entry
+            .message
+            .usage
+            .as_ref()
             .map(|u| u.output_tokens)
             .unwrap_or(0)
     }
-    
+
     pub fn cache_tokens(&self) -> u32 {
-        self.entry.message.usage.as_ref()
+        self.entry
+            .message
+            .usage
+            .as_ref()
             .map(|u| u.cache_creation_input_tokens + u.cache_read_input_tokens)
             .unwrap_or(0)
     }
-    
+
     pub fn has_usage(&self) -> bool {
         self.entry.message.usage.is_some()
     }
 }
-
 
 impl Default for FileParser {
     fn default() -> Self {
@@ -188,8 +196,14 @@ impl FileParser {
         self.file_discovery.find_jsonl_files(claude_paths)
     }
 
-    pub fn should_include_file(&self, file_path: &Path, since_date: Option<&DateTime<Utc>>, until_date: Option<&DateTime<Utc>>) -> bool {
-        self.file_discovery.should_include_file(file_path, since_date, until_date)
+    pub fn should_include_file(
+        &self,
+        file_path: &Path,
+        since_date: Option<&DateTime<Utc>>,
+        until_date: Option<&DateTime<Utc>>,
+    ) -> bool {
+        self.file_discovery
+            .should_include_file(file_path, since_date, until_date)
     }
 
     #[allow(dead_code)]
@@ -197,7 +211,10 @@ impl FileParser {
         self.file_discovery.get_earliest_timestamp(file_path)
     }
 
-    pub fn sort_files_by_timestamp(&self, file_tuples: Vec<(PathBuf, PathBuf)>) -> Vec<(PathBuf, PathBuf)> {
+    pub fn sort_files_by_timestamp(
+        &self,
+        file_tuples: Vec<(PathBuf, PathBuf)>,
+    ) -> Vec<(PathBuf, PathBuf)> {
         self.file_discovery.sort_files_by_timestamp(file_tuples)
     }
 
@@ -207,14 +224,18 @@ impl FileParser {
         let processor = CollectorProcessor::new();
         self.process_jsonl_file(file_path, processor)
     }
-    
+
     // Generic method that accepts any processor
     #[allow(dead_code)]
-    pub fn process_jsonl_file<P: JsonlProcessor>(&self, file_path: &Path, mut processor: P) -> Result<P::Output> {
+    pub fn process_jsonl_file<P: JsonlProcessor>(
+        &self,
+        file_path: &Path,
+        mut processor: P,
+    ) -> Result<P::Output> {
         let file = File::open(file_path)?;
         let reader = BufReader::new(file);
         let mut line_number = 0;
-        
+
         for line in reader.lines() {
             line_number += 1;
             let line = line?;
@@ -222,12 +243,12 @@ impl FileParser {
             if line.is_empty() {
                 continue;
             }
-            
+
             if let Some(entry) = self.keeper_integration.parse_single_line(line) {
                 processor.process_entry(entry, line_number)?;
             }
         }
-        
+
         processor.finalize()
     }
 
@@ -249,7 +270,7 @@ impl FileParser {
 
     pub fn get_latest_session_blocks(&self, claude_paths: &[PathBuf]) -> Result<Vec<SessionBlock>> {
         let block_files = self.find_session_blocks_files(claude_paths)?;
-        
+
         if let Some(latest_file) = block_files.first() {
             self.parse_session_blocks_file(latest_file)
         } else {
@@ -277,18 +298,20 @@ impl Default for CollectorProcessor {
 impl CollectorProcessor {
     #[allow(dead_code)]
     pub fn new() -> Self {
-        Self { entries: Vec::new() }
+        Self {
+            entries: Vec::new(),
+        }
     }
 }
 
 impl JsonlProcessor for CollectorProcessor {
     type Output = Vec<UsageEntry>;
-    
+
     fn process_entry(&mut self, entry: UsageEntry, _line_number: usize) -> Result<()> {
         self.entries.push(entry);
         Ok(())
     }
-    
+
     fn finalize(self) -> Result<Self::Output> {
         Ok(self.entries)
     }
@@ -316,12 +339,12 @@ impl CountProcessor {
 #[allow(dead_code)]
 impl JsonlProcessor for CountProcessor {
     type Output = usize;
-    
+
     fn process_entry(&mut self, _entry: UsageEntry, _line_number: usize) -> Result<()> {
         self.count += 1;
         Ok(())
     }
-    
+
     fn finalize(self) -> Result<Self::Output> {
         Ok(self.count)
     }
@@ -356,14 +379,14 @@ where
     F: Fn(&UsageEntry) -> bool,
 {
     type Output = Vec<UsageEntry>;
-    
+
     fn process_entry(&mut self, entry: UsageEntry, _line_number: usize) -> Result<()> {
         if (self.predicate)(&entry) {
             self.entries.push(entry);
         }
         Ok(())
     }
-    
+
     fn finalize(self) -> Result<Self::Output> {
         Ok(self.entries)
     }
@@ -394,11 +417,11 @@ where
     F: FnMut(UsageEntry, usize) -> Result<()>,
 {
     type Output = ();
-    
+
     fn process_entry(&mut self, entry: UsageEntry, line_number: usize) -> Result<()> {
         (self.callback)(entry, line_number)
     }
-    
+
     fn finalize(self) -> Result<Self::Output> {
         Ok(())
     }
@@ -430,14 +453,14 @@ impl ProcessedEntryCollector {
 #[allow(dead_code)]
 impl JsonlProcessor for ProcessedEntryCollector {
     type Output = Vec<ProcessedEntry>;
-    
+
     fn process_entry(&mut self, entry: UsageEntry, line_number: usize) -> Result<()> {
         if let Ok(processed) = ProcessedEntry::new(entry, &self.parser, line_number) {
             self.entries.push(processed);
         }
         Ok(())
     }
-    
+
     fn finalize(self) -> Result<Self::Output> {
         Ok(self.entries)
     }
@@ -472,7 +495,7 @@ where
     F: FnMut(ProcessedEntry) -> Result<()>,
 {
     type Output = ();
-    
+
     fn process_entry(&mut self, entry: UsageEntry, line_number: usize) -> Result<()> {
         if entry.message.usage.is_some() {
             if let Ok(processed) = ProcessedEntry::new(entry, &self.parser, line_number) {
@@ -481,9 +504,8 @@ where
         }
         Ok(())
     }
-    
+
     fn finalize(self) -> Result<Self::Output> {
         Ok(())
     }
 }
-

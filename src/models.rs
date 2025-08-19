@@ -45,7 +45,7 @@
 //! - **Type Safety**: Strong typing prevents common data manipulation errors
 
 use serde::{Deserialize, Serialize};
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageEntry {
@@ -61,7 +61,7 @@ pub struct UsageEntry {
 pub struct MessageData {
     pub id: String,
     pub model: String,
-    pub usage: Option<UsageData>,  // Make usage optional to match Python behavior
+    pub usage: Option<UsageData>, // Make usage optional to match Python behavior
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,7 +96,7 @@ pub struct SessionData {
     pub total_cost: f64,
     pub last_activity: Option<String>,
     pub models_used: HashSet<String>,
-    pub daily_usage: HashMap<String, DailyUsage>,  // Track usage per day
+    pub daily_usage: HashMap<String, DailyUsage>, // Track usage per day
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -120,7 +120,7 @@ pub struct SessionOutput {
     #[serde(rename = "modelsUsed")]
     pub models_used: Vec<String>,
     #[serde(skip)]
-    pub daily_usage: HashMap<String, DailyUsage>,  // Daily breakdown for internal use
+    pub daily_usage: HashMap<String, DailyUsage>, // Daily breakdown for internal use
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -184,8 +184,6 @@ pub struct PricingData {
     pub cache_read_input_token_cost: Option<f64>,
 }
 
-
-
 impl SessionData {
     pub fn new(session_id: String, project_path: String) -> Self {
         Self {
@@ -217,7 +215,9 @@ impl From<SessionData> for SessionOutput {
             cache_creation_tokens: data.cache_creation_tokens,
             cache_read_tokens: data.cache_read_tokens,
             total_cost: data.total_cost,
-            last_activity: data.last_activity.unwrap_or_else(|| "1970-01-01".to_string()),
+            last_activity: data
+                .last_activity
+                .unwrap_or_else(|| "1970-01-01".to_string()),
             models_used: {
                 let mut models: Vec<String> = data.models_used.into_iter().collect();
                 models.sort();
@@ -230,6 +230,9 @@ impl From<SessionData> for SessionOutput {
 
 impl TokenCounts {
     pub fn total(&self) -> u32 {
-        self.input_tokens + self.output_tokens + self.cache_creation_input_tokens + self.cache_read_input_tokens
+        self.input_tokens
+            + self.output_tokens
+            + self.cache_creation_input_tokens
+            + self.cache_read_input_tokens
     }
 }

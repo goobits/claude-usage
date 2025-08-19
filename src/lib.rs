@@ -64,20 +64,20 @@
 //! - [`SessionOutput`] - Serializable session data for reports
 //! - [`dedup::ProcessOptions`] - Configuration for analysis operations
 
-pub mod models;
-pub mod parser;
-pub mod file_discovery;
-pub mod timestamp_parser;
-pub mod session_utils;
-pub mod dedup;
 pub mod analyzer;
+pub mod config;
+pub mod dedup;
 pub mod display;
-pub mod monitor;
-pub mod pricing;
-pub mod parser_wrapper;
+pub mod file_discovery;
 pub mod logging;
 pub mod memory;
-pub mod config;
+pub mod models;
+pub mod monitor;
+pub mod parser;
+pub mod parser_wrapper;
+pub mod pricing;
+pub mod session_utils;
+pub mod timestamp_parser;
 
 pub use analyzer::ClaudeUsageAnalyzer;
 pub use models::*;

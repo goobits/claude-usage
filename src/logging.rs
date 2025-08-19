@@ -16,20 +16,19 @@ use tracing_subscriber::{
 };
 use uuid::Uuid;
 
-
 /// Initialize the logging system based on configuration
 pub fn init_logging() {
     let config = get_config();
-    
+
     // Use configuration values
     let log_level = &config.logging.level;
     let log_output = &config.logging.output;
     let log_format = &config.logging.format;
-    
+
     // Build environment filter
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(log_level));
-    
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(log_level));
+
     // Configure output based on config
     match log_output.as_str() {
         "file" => init_file_logging(env_filter, log_format, &config.paths.log_directory),
@@ -39,29 +38,32 @@ pub fn init_logging() {
 }
 
 fn init_console_logging(filter: EnvFilter, format: &str) {
-    let subscriber = tracing_subscriber::registry()
-        .with(filter);
-    
+    let subscriber = tracing_subscriber::registry().with(filter);
+
     match format {
         "json" => {
-            subscriber.with(
-                fmt::layer()
-                    .json()
-                    .with_current_span(true)
-                    .with_span_list(true)
-                    .with_target(true)
-                    .with_file(true)
-                    .with_line_number(true)
-            ).init();
+            subscriber
+                .with(
+                    fmt::layer()
+                        .json()
+                        .with_current_span(true)
+                        .with_span_list(true)
+                        .with_target(true)
+                        .with_file(true)
+                        .with_line_number(true),
+                )
+                .init();
         }
         _ => {
-            subscriber.with(
-                fmt::layer()
-                    .with_target(true)
-                    .with_ansi(true)
-                    .with_span_events(FmtSpan::CLOSE)
-                    .pretty()
-            ).init();
+            subscriber
+                .with(
+                    fmt::layer()
+                        .with_target(true)
+                        .with_ansi(true)
+                        .with_span_events(FmtSpan::CLOSE)
+                        .pretty(),
+                )
+                .init();
         }
     }
 }
@@ -69,26 +71,25 @@ fn init_console_logging(filter: EnvFilter, format: &str) {
 fn init_file_logging(filter: EnvFilter, format: &str, log_dir: &std::path::Path) {
     let file_appender = tracing_appender::rolling::daily(log_dir, "claude-usage.log");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-    
-    let subscriber = tracing_subscriber::registry()
-        .with(filter);
-    
+
+    let subscriber = tracing_subscriber::registry().with(filter);
+
     match format {
         "json" => {
-            subscriber.with(
-                fmt::layer()
-                    .json()
-                    .with_writer(non_blocking)
-                    .with_current_span(true)
-                    .with_span_list(true)
-            ).init();
+            subscriber
+                .with(
+                    fmt::layer()
+                        .json()
+                        .with_writer(non_blocking)
+                        .with_current_span(true)
+                        .with_span_list(true),
+                )
+                .init();
         }
         _ => {
-            subscriber.with(
-                fmt::layer()
-                    .with_writer(non_blocking)
-                    .with_ansi(false)
-            ).init();
+            subscriber
+                .with(fmt::layer().with_writer(non_blocking).with_ansi(false))
+                .init();
         }
     }
 }
@@ -96,10 +97,9 @@ fn init_file_logging(filter: EnvFilter, format: &str, log_dir: &std::path::Path)
 fn init_combined_logging(filter: EnvFilter, format: &str, log_dir: &std::path::Path) {
     let file_appender = tracing_appender::rolling::daily(log_dir, "claude-usage.log");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-    
-    let subscriber = tracing_subscriber::registry()
-        .with(filter);
-    
+
+    let subscriber = tracing_subscriber::registry().with(filter);
+
     match format {
         "json" => {
             subscriber
