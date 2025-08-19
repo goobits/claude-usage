@@ -269,27 +269,24 @@ pub fn create_main_layout(area: Rect) -> Vec<Rect> {
             Constraint::Length(1), // Status line
         ])
         .split(area)
+        .to_vec()
 }
 
 /// Helper function to create a centered rectangle
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let popup_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(r);
-
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(popup_layout[1])[1]
+    // Calculate exact pixel dimensions for more predictable centering
+    let target_width = (r.width * percent_x) / 100;
+    let target_height = (r.height * percent_y) / 100;
+    
+    let x_offset = (r.width - target_width) / 2;
+    let y_offset = (r.height - target_height) / 2;
+    
+    Rect {
+        x: r.x + x_offset,
+        y: r.y + y_offset,
+        width: target_width,
+        height: target_height,
+    }
 }
 
 /// Render the complete live display UI

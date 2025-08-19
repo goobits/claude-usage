@@ -11,7 +11,10 @@ use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(not(test))]
 use std::sync::OnceLock;
+#[cfg(test)]
+use std::sync::Mutex;
 use tracing::{info, warn};
 
 /// Main configuration structure
@@ -94,7 +97,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             logging: LoggingConfig {
-                level: "ERROR".to_string(),
+                level: "WARN".to_string(),
                 format: "pretty".to_string(),
                 output: "console".to_string(),
             },
@@ -313,11 +316,41 @@ impl Config {
 }
 
 /// Global configuration instance
+#[cfg(not(test))]
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
+/// Global configuration instance for tests (mutable)
+#[cfg(test)]
+static CONFIG: Mutex<Option<&'static Config>> = Mutex::new(None);
+
 /// Get the global configuration instance
+#[cfg(not(test))]
 pub fn get_config() -> &'static Config {
     CONFIG.get_or_init(|| Config::load().expect("Failed to load configuration"))
+}
+
+/// Get the global configuration instance for tests
+#[cfg(test)]
+pub fn get_config() -> &'static Config {
+    let mut guard = CONFIG.lock().unwrap();
+    if let Some(config) = *guard {
+        config
+    } else {
+        // Load configuration and leak it to get a static reference
+        let config = Config::load().expect("Failed to load configuration");
+        let config_ref: &'static Config = Box::leak(Box::new(config));
+        *guard = Some(config_ref);
+        config_ref
+    }
+}
+
+/// Reset the global configuration for testing
+#[cfg(test)]
+pub fn reset_config_for_test() {
+    let mut guard = CONFIG.lock().unwrap();
+    // Note: This intentionally leaks memory in tests for simplicity
+    // The leaked config will be cleaned up when the test process exits
+    *guard = None;
 }
 
 #[cfg(test)]
@@ -327,7 +360,7 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = Config::default();
-        assert_eq!(config.logging.level, "ERROR");
+        assert_eq!(config.logging.level, "WARN");
         assert_eq!(config.processing.batch_size, 10);
         assert_eq!(config.memory.max_memory_mb, 512);
     }
@@ -346,5 +379,24 @@ mod tests {
         let mut config = Config::default();
         config.processing.batch_size = 0;
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_config_reset_functionality() {
+        // Test that reset_config_for_test works correctly
+        reset_config_for_test();
+        
+        // Get config should work after reset
+        let config = get_config();
+        assert_eq!(config.logging.level, "WARN");
+        
+        // Reset again to ensure it's safe to call multiple times
+        reset_config_for_test();
+        
+        let config2 = get_config();
+        assert_eq!(config2.logging.level, "WARN");
+        
+        // Test that the function is thread-safe (no undefined behavior)
+        // This test mainly ensures the code compiles and runs without panicking
     }
 }

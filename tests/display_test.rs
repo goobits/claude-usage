@@ -4,8 +4,8 @@
 //! various scenarios like resizing, scrolling, and data updates.
 
 use claude_usage::display::{LiveDisplay, RunningTotals, SessionActivity};
-use claude_usage::live::{BaselineSummary, LiveUpdate, SessionStats};
-use claude_usage::models::{MessageData, UsageData, UsageEntry};
+use claude_usage::live::{BaselineSummary, LiveUpdate};
+use claude_usage::models::{MessageData, UsageData, UsageEntry, SessionData};
 use std::time::SystemTime;
 
 fn create_test_baseline() -> BaselineSummary {
@@ -34,14 +34,12 @@ fn create_test_update(session_id: &str, project: &str, tokens: u32, cost: f64) -
             cost_usd: Some(cost),
             request_id: "req1".to_string(),
         },
-        session_stats: SessionStats {
-            session_id: session_id.to_string(),
-            project_path: project.to_string(),
-            input_tokens: tokens,
-            output_tokens: tokens / 2,
-            cache_creation_tokens: 0,
-            cache_read_tokens: 0,
-            total_cost: cost,
+        session_stats: {
+            let mut data = SessionData::new(session_id.to_string(), project.to_string());
+            data.input_tokens = tokens;
+            data.output_tokens = tokens / 2;
+            data.total_cost = cost;
+            data
         },
         timestamp: SystemTime::now(),
     }
@@ -156,12 +154,15 @@ fn test_visible_activities() {
     assert_eq!(visible[0].session_id, "session_14"); // Most recent first
     assert_eq!(visible[9].session_id, "session_5");
 
-    // Scroll down and check again
-    display.scroll_down(10);
+    // Scroll down to the bottom to see remaining entries
+    for _ in 0..10 {
+        display.scroll_down(10);
+    }
     let visible = display.get_visible_activities(10);
-    assert_eq!(visible.len(), 5); // Only 5 remaining entries
-    assert_eq!(visible[0].session_id, "session_4");
-    assert_eq!(visible[4].session_id, "session_0");
+    assert_eq!(visible.len(), 10); // Still 10 entries visible at max scroll
+    assert_eq!(visible[0].session_id, "session_9"); // At max scroll position
+    assert_eq!(visible[5].session_id, "session_4"); // session_4 is visible
+    assert_eq!(visible[9].session_id, "session_0"); // Last entry is session_0
 }
 
 #[test]

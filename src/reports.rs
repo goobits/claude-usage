@@ -20,7 +20,7 @@
 //!
 //! ## Key Types
 //!
-//! - [`DisplayManager`] - Main interface for all display operations
+//! - [`ReportDisplayManager`] - Main interface for all display operations
 //!
 //! ## Output Formats
 //!
@@ -77,9 +77,9 @@
 //! ## Usage Example
 //!
 //! ```rust
-//! use claude_usage::reports::DisplayManager;
+//! use claude_usage::reports::ReportDisplayManager;
 //!
-//! let display_manager = DisplayManager::new();
+//! let display_manager = ReportDisplayManager::new();
 //! let sessions = vec![/* session data */];
 //!
 //! // Display daily report
@@ -100,15 +100,15 @@ use crate::models::*;
 use colored::Colorize;
 use std::collections::{HashMap, HashSet};
 
-pub struct DisplayManager;
+pub struct ReportDisplayManager;
 
-impl Default for DisplayManager {
+impl Default for ReportDisplayManager {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl DisplayManager {
+impl ReportDisplayManager {
     pub fn new() -> Self {
         Self
     }

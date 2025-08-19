@@ -37,7 +37,7 @@
 //! - [`UnifiedParser`] - Handles JSONL file parsing with schema flexibility
 //! - [`FileParser`] - Provides file discovery and basic parsing utilities
 //! - [`DeduplicationEngine`] - Prevents double-counting of usage data
-//! - [`DisplayManager`] - Formats and presents analysis results
+//! - [`ReportDisplayManager`] - Formats and presents analysis results
 //! ## Usage Example
 //!
 //! ```rust
@@ -70,7 +70,7 @@
 //! - **Early Exit Optimization**: Can stop processing early when limits are reached
 
 use crate::dedup::{DeduplicationEngine, ProcessOptions};
-use crate::reports::DisplayManager;
+use crate::reports::ReportDisplayManager;
 use crate::models::*;
 use crate::parser::FileParser;
 use crate::parser_wrapper::UnifiedParser;
@@ -81,7 +81,7 @@ pub struct ClaudeUsageAnalyzer {
     parser: UnifiedParser,
     file_parser: FileParser,
     dedup_engine: DeduplicationEngine,
-    display_manager: DisplayManager,
+    display_manager: ReportDisplayManager,
 }
 
 impl Default for ClaudeUsageAnalyzer {
@@ -96,7 +96,7 @@ impl ClaudeUsageAnalyzer {
             parser: UnifiedParser::new(),
             file_parser: FileParser::new(),
             dedup_engine: DeduplicationEngine::new(),
-            display_manager: DisplayManager::new(),
+            display_manager: ReportDisplayManager::new(),
         }
     }
 

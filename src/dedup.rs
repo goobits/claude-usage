@@ -243,8 +243,20 @@ impl DeduplicationEngine {
 
                     if skip_duplicate {
                         total_entries_skipped += 1;
+                        tracing::debug!(
+                            message_id = %entry.message.id,
+                            request_id = %entry.request_id,
+                            "Skipping duplicate entry"
+                        );
                         continue;
                     }
+                    
+                    tracing::debug!(
+                        message_id = %entry.message.id,
+                        request_id = %entry.request_id,
+                        cost_usd = ?entry.cost_usd,
+                        "Processing entry for cost calculation"
+                    );
 
                     // Mark as processed globally
                     if let Some(hash) = &unique_hash {
@@ -410,9 +422,36 @@ impl DeduplicationEngine {
     }
 
     async fn calculate_entry_cost(&self, entry: &UsageEntry) -> f64 {
+        // First check if entry has pre-calculated cost from JSON
+        if let Some(cost) = entry.cost_usd {
+            tracing::debug!(
+                message_id = %entry.message.id,
+                request_id = %entry.request_id,
+                cost_usd = cost,
+                "Using pre-calculated cost from JSON"
+            );
+            return cost;
+        }
+        
+        // Fall back to token-based calculation
         if let Some(usage) = &entry.message.usage {
-            PricingManager::calculate_cost_from_tokens(usage, &entry.message.model).await
+            let calculated_cost = PricingManager::calculate_cost_from_tokens(usage, &entry.message.model).await;
+            tracing::debug!(
+                message_id = %entry.message.id,
+                request_id = %entry.request_id,
+                input_tokens = usage.input_tokens,
+                output_tokens = usage.output_tokens,
+                model = %entry.message.model,
+                calculated_cost = calculated_cost,
+                "Using token-based cost calculation"
+            );
+            calculated_cost
         } else {
+            tracing::debug!(
+                message_id = %entry.message.id,
+                request_id = %entry.request_id,
+                "No usage data or cost information"
+            );
             0.0
         }
     }

@@ -218,11 +218,11 @@ mod tests {
         track_allocation(2048);
 
         // Should be able to get usage
-        let usage_mb = get_memory_usage_mb();
-        // usage_mb is usize and always >= 0, so assertion is redundant
+        let _usage_mb = get_memory_usage_mb();
+        // _usage_mb is usize and always >= 0, so assertion is redundant
 
         // Should be able to check pressure
-        let has_pressure = check_memory_pressure();
+        let _has_pressure = check_memory_pressure();
         // Boolean value is always true or false, assertion is redundant
 
         // Track deallocations
@@ -247,7 +247,7 @@ mod tests {
         init_memory_limit();
 
         // Should return a boolean without panicking
-        let should_spill = should_spill_to_disk();
+        let _should_spill = should_spill_to_disk();
         // Boolean value is always true or false, assertion is redundant
     }
 
@@ -255,10 +255,10 @@ mod tests {
     fn test_pressure_level() {
         init_memory_limit();
 
-        let pressure = get_pressure_level();
+        let _pressure = get_pressure_level();
         // Should be one of the valid pressure levels
         matches!(
-            pressure,
+            _pressure,
             MemoryPressureLevel::Low
                 | MemoryPressureLevel::Normal
                 | MemoryPressureLevel::High

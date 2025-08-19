@@ -26,7 +26,7 @@ const UPDATE_INTERVAL_MS: u64 = 1000;
 type TerminalBackend = CrosstermBackend<Stdout>;
 
 /// Main display manager for the live monitoring TUI
-pub struct DisplayManager {
+pub struct LiveDisplayManager {
     /// The ratatui terminal instance
     terminal: Terminal<TerminalBackend>,
     /// Current display state
@@ -41,7 +41,7 @@ pub struct DisplayManager {
     last_cleanup: Instant,
 }
 
-impl DisplayManager {
+impl LiveDisplayManager {
     /// Create a new display manager
     pub async fn new(
         baseline: BaselineSummary,
@@ -176,7 +176,7 @@ impl DisplayManager {
     }
 }
 
-impl Drop for DisplayManager {
+impl Drop for LiveDisplayManager {
     fn drop(&mut self) {
         let _ = cleanup_terminal(&mut self.terminal);
     }
@@ -207,7 +207,7 @@ fn cleanup_terminal(terminal: &mut Terminal<TerminalBackend>) -> Result<()> {
 }
 
 /// Graceful shutdown handler for the display
-pub async fn handle_shutdown(mut display_manager: DisplayManager) -> Result<()> {
+pub async fn handle_shutdown(mut display_manager: LiveDisplayManager) -> Result<()> {
     // Allow some time for final updates
     tokio::time::sleep(Duration::from_millis(100)).await;
     
@@ -218,39 +218,10 @@ pub async fn handle_shutdown(mut display_manager: DisplayManager) -> Result<()> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::live::SessionStats;
+    use crate::models::SessionData;
     use crate::models::{MessageData, UsageData, UsageEntry};
     use std::time::SystemTime;
 
-    fn create_test_update() -> LiveUpdate {
-        LiveUpdate {
-            entry: UsageEntry {
-                timestamp: "2025-01-01T12:00:00Z".to_string(),
-                message: MessageData {
-                    id: "msg1".to_string(),
-                    model: "claude-3-5-sonnet-20241022".to_string(),
-                    usage: Some(UsageData {
-                        input_tokens: 100,
-                        output_tokens: 50,
-                        cache_creation_input_tokens: 0,
-                        cache_read_input_tokens: 0,
-                    }),
-                },
-                cost_usd: Some(0.01),
-                request_id: "req1".to_string(),
-            },
-            session_stats: SessionStats {
-                session_id: "session1".to_string(),
-                project_path: "/path/to/project".to_string(),
-                input_tokens: 100,
-                output_tokens: 50,
-                cache_creation_tokens: 0,
-                cache_read_tokens: 0,
-                total_cost: 0.01,
-            },
-            timestamp: SystemTime::now(),
-        }
-    }
 
     #[tokio::test]
     async fn test_display_manager_creation() {
@@ -259,7 +230,7 @@ mod tests {
         
         // This test requires a terminal, so we'll just test the creation logic
         // In a real environment, this would work
-        let result = DisplayManager::new(baseline, rx).await;
+        let result = LiveDisplayManager::new(baseline, rx).await;
         
         // In test environment without a terminal, this might fail
         // That's expected and acceptable for unit tests

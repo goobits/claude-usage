@@ -12,7 +12,7 @@ mod config_tests {
         let config = Config::default();
 
         // Test logging defaults
-        assert_eq!(config.logging.level, "INFO");
+        assert_eq!(config.logging.level, "WARN");
         assert_eq!(config.logging.format, "pretty");
         assert_eq!(config.logging.output, "console");
 
@@ -130,6 +130,12 @@ timestamp_format = "%Y/%m/%d %H:%M"
 claude_home = "/custom/claude"
 vms_directory = "/custom/vms"
 log_directory = "/custom/logs"
+
+[live]
+startup_timeout_secs = 60
+max_restart_attempts = 5
+update_channel_buffer = 200
+claude_keeper_path = "/custom/claude-keeper"
         "#;
 
         fs::write(&config_path, test_config).expect("Failed to write test config");

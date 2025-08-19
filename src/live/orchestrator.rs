@@ -13,9 +13,20 @@ use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
 use crate::live::{BaselineSummary, LiveConfig, LiveUpdate};
-use crate::live::baseline::load_baseline_summary;
+use crate::live::baseline::{load_baseline_summary, refresh_baseline, should_refresh_baseline};
 use crate::live::watcher::KeeperWatcher;
 use crate::models::{SessionData, UsageEntry};
+
+/// Format token count with appropriate units (K, M)
+fn format_tokens(tokens: u64) -> String {
+    if tokens >= 1_000_000 {
+        format!("{:.1}M", tokens as f64 / 1_000_000.0)
+    } else if tokens >= 1_000 {
+        format!("{:.1}K", tokens as f64 / 1_000.0)
+    } else {
+        tokens.to_string()
+    }
+}
 
 /// Main orchestrator for live mode operations
 pub struct LiveOrchestrator {
@@ -27,17 +38,46 @@ pub struct LiveOrchestrator {
 
 impl LiveOrchestrator {
     /// Create a new live orchestrator
-    pub fn new(no_baseline: bool) -> Result<Self> {
+    pub async fn new(no_baseline: bool) -> Result<Self> {
         let config = LiveConfig::default(); // Use default for now
         
         let baseline = if no_baseline {
             info!("Skipping baseline loading (--no-baseline specified)");
             BaselineSummary::default()
         } else {
-            load_baseline_summary().unwrap_or_else(|e| {
-                warn!(error = %e, "Failed to load baseline, using empty baseline");
-                BaselineSummary::default()
-            })
+            // Check if we need to refresh baseline
+            match should_refresh_baseline() {
+                true => {
+                    println!("📦 Creating baseline from conversation history...");
+                    println!("⏳ Running auto-backup (this may take 10-30 seconds)...");
+                    info!("Refreshing baseline data (missing or stale)...");
+                    
+                    refresh_baseline().await.unwrap_or_else(|e| {
+                        println!("⚠️  Auto-backup encountered an issue, using existing data");
+                        println!("💡 Live monitoring will still work for new conversations");
+                        warn!(error = %e, "Auto-backup failed, using existing baseline");
+                        load_baseline_summary().unwrap_or_default()
+                    })
+                }
+                false => {
+                    println!("📚 Loading existing baseline data...");
+                    load_baseline_summary().unwrap_or_else(|e| {
+                        println!("⚠️  Unable to load baseline, creating fresh backup...");
+                        warn!(error = %e, "Failed to load baseline, trying auto-backup");
+                        // Fallback: try refresh if load fails
+                        tokio::task::block_in_place(|| {
+                            tokio::runtime::Handle::current().block_on(async {
+                                refresh_baseline().await.unwrap_or_else(|e| {
+                                    println!("❌ Backup creation failed - starting with empty baseline");
+                                    println!("💡 You'll see all new usage starting from now");
+                                    warn!(error = %e, "Fallback auto-backup also failed, using empty baseline");
+                                    BaselineSummary::default()
+                                })
+                            })
+                        })
+                    })
+                }
+            }
         };
 
         Ok(Self {
@@ -50,6 +90,18 @@ impl LiveOrchestrator {
 
     /// Run the live orchestrator
     pub async fn run(&mut self, tx: mpsc::Sender<LiveUpdate>) -> Result<()> {
+        // Show baseline summary to user
+        if !self.no_baseline && (self.baseline.total_cost > 0.0 || self.baseline.total_tokens > 0) {
+            println!("📈 Baseline loaded successfully:");
+            println!("   💰 Total cost: ${:.2}", self.baseline.total_cost);
+            println!("   🎯 Total tokens: {}", format_tokens(self.baseline.total_tokens));
+            println!("   📅 Sessions today: {}", self.baseline.sessions_today);
+        } else if !self.no_baseline {
+            println!("🆕 Starting fresh - no previous usage data found");
+            println!("💡 New conversations will appear as you use Claude");
+        }
+        println!();
+        
         info!(
             baseline_cost = self.baseline.total_cost,
             baseline_tokens = self.baseline.total_tokens,
@@ -58,13 +110,25 @@ impl LiveOrchestrator {
         );
 
         // Start claude-keeper watcher
+        println!("🔗 Connecting to claude-keeper for live updates...");
         let mut watcher = KeeperWatcher::new(&self.config)?;
+        
+        // Flag to track first successful connection
+        let mut first_connection = true;
         
         // Main processing loop
         loop {
             // Get next usage entry from claude-keeper
             match watcher.next_entry().await {
                 Ok(Some(entry)) => {
+                    // Show success message on first entry
+                    if first_connection {
+                        println!("✅ Connected! Now monitoring live Claude usage...");
+                        println!("💡 Use new Claude conversations to see real-time updates");
+                        println!();
+                        first_connection = false;
+                    }
+                    
                     if let Err(e) = self.process_entry(entry, &tx).await {
                         error!(error = %e, "Failed to process usage entry");
                         // Continue processing other entries
@@ -80,10 +144,12 @@ impl LiveOrchestrator {
                     
                     // Try to restart watcher
                     if watcher.should_restart() {
+                        println!("⚠️  Connection lost, attempting to reconnect...");
                         warn!("Attempting to restart claude-keeper watcher");
                         watcher = KeeperWatcher::new(&self.config)?;
                         continue;
                     } else {
+                        println!("❌ Connection failed permanently after multiple attempts");
                         return Err(e).context("Claude-keeper watcher failed and cannot restart");
                     }
                 }
@@ -144,6 +210,11 @@ impl LiveOrchestrator {
         }
 
         Ok(())
+    }
+
+    /// Get the baseline summary
+    pub fn get_baseline(&self) -> BaselineSummary {
+        self.baseline.clone()
     }
 
     /// Get current session summary

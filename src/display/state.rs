@@ -3,7 +3,8 @@
 //! This module manages the state for the live display TUI, including the ring buffer
 //! for recent activities, current session tracking, and running totals.
 
-use crate::live::{BaselineSummary, LiveUpdate, SessionStats};
+use crate::live::{BaselineSummary, LiveUpdate};
+use crate::models::SessionData;
 use super::{RunningTotals, SessionActivity};
 use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, SystemTime};
@@ -19,7 +20,7 @@ pub struct LiveDisplay {
     /// Ring buffer of recent activities (max 100, FIFO)
     pub recent_entries: VecDeque<SessionActivity>,
     /// Current active session, if any
-    pub current_session: Option<SessionStats>,
+    pub current_session: Option<SessionData>,
     /// Running totals including baseline and live updates
     pub running_totals: RunningTotals,
     /// Current scroll position for recent activities
@@ -183,7 +184,6 @@ impl LiveDisplay {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::live::SessionStats;
     use crate::models::{MessageData, UsageData, UsageEntry};
 
     fn create_test_update(session_id: &str, project: &str, tokens: u32, cost: f64) -> LiveUpdate {
@@ -203,14 +203,11 @@ mod tests {
                 cost_usd: Some(cost),
                 request_id: "req1".to_string(),
             },
-            session_stats: SessionStats {
-                session_id: session_id.to_string(),
-                project_path: project.to_string(),
-                input_tokens: tokens,
-                output_tokens: 0,
-                cache_creation_tokens: 0,
-                cache_read_tokens: 0,
-                total_cost: cost,
+            session_stats: {
+                let mut data = SessionData::new(session_id.to_string(), project.to_string());
+                data.input_tokens = tokens;
+                data.total_cost = cost;
+                data
             },
             timestamp: SystemTime::now(),
         }

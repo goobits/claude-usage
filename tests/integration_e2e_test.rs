@@ -1,11 +1,15 @@
 //! End-to-end integration tests with real-world data patterns
 
 use claude_usage::analyzer::ClaudeUsageAnalyzer;
+// Note: Test isolation removed for simplicity
 use claude_usage::dedup::ProcessOptions;
 use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use tempfile::TempDir;
+
+/// Set up test environment with temporary Claude home directory
+// Note: Test environment setup simplified - just set CLAUDE_HOME directly
 
 /// Create a mock Claude Desktop directory structure
 fn create_mock_claude_structure() -> TempDir {
@@ -78,12 +82,16 @@ fn create_realistic_jsonl(path: &Path, num_entries: usize, include_malformed: bo
 
 #[tokio::test]
 async fn test_e2e_basic_analysis() {
+    // Config reset removed
     let temp_dir = create_mock_claude_structure();
     let claude_path = temp_dir.path().join(".claude");
 
     // Create test data
     let project_path = claude_path.join("projects").join("test_project_main");
     create_realistic_jsonl(&project_path.join("conversation_test.jsonl"), 50, false);
+
+    // Set up test environment
+    std::env::set_var("CLAUDE_HOME", temp_dir.path());
 
     // Set up analyzer
     let mut analyzer = ClaudeUsageAnalyzer::new();
@@ -103,16 +111,23 @@ async fn test_e2e_basic_analysis() {
     assert!(result.is_ok(), "Analysis should succeed");
     let sessions = result.unwrap();
     assert!(!sessions.is_empty(), "Should find sessions");
+
+    // Clean up
+    // Cleanup removed
 }
 
 #[tokio::test]
 async fn test_e2e_with_malformed_data() {
+    // Config reset removed
     let temp_dir = create_mock_claude_structure();
     let claude_path = temp_dir.path().join(".claude");
 
     // Create test data with malformed lines
     let project_path = claude_path.join("projects").join("test_project_main");
     create_realistic_jsonl(&project_path.join("conversation_malformed.jsonl"), 50, true);
+
+    // Set up test environment
+    std::env::set_var("CLAUDE_HOME", temp_dir.path());
 
     let mut analyzer = ClaudeUsageAnalyzer::new();
     let options = ProcessOptions {
@@ -134,10 +149,14 @@ async fn test_e2e_with_malformed_data() {
         !sessions.is_empty(),
         "Should parse valid entries despite malformed ones"
     );
+
+    // Clean up
+    // Cleanup removed
 }
 
 #[tokio::test]
 async fn test_e2e_vm_exclusion() {
+    // Config reset removed
     let temp_dir = create_mock_claude_structure();
     let claude_path = temp_dir.path().join(".claude");
 
@@ -151,6 +170,9 @@ async fn test_e2e_vm_exclusion() {
         .join("projects")
         .join("test_project_vm");
     create_realistic_jsonl(&vm_project.join("conversation_vm.jsonl"), 20, false);
+
+    // Set up test environment
+    std::env::set_var("CLAUDE_HOME", temp_dir.path());
 
     let mut analyzer = ClaudeUsageAnalyzer::new();
 
@@ -191,11 +213,15 @@ async fn test_e2e_vm_exclusion() {
         result_with_vms.len() > result_without_vms.len(),
         "Should have more sessions with VMs included"
     );
+
+    // Clean up
+    // Cleanup removed
 }
 
 #[cfg(feature = "keeper-integration")]
 #[tokio::test]
 async fn test_e2e_keeper_schema_resilience() {
+    // Config reset removed
     let temp_dir = create_mock_claude_structure();
     let claude_path = temp_dir.path().join(".claude");
 
@@ -210,6 +236,9 @@ async fn test_e2e_keeper_schema_resilience() {
     writeln!(file, r#"{{"timestamp":"2025-01-15T10:30:00Z","message":{{"id":"msg_1","model":"claude-3-5-sonnet-20241022","usage":{{"input_tokens":100,"output_tokens":200}}}},"costUSD":0.003,"requestId":"req_1"}}"#).unwrap();
     writeln!(file, r#"{{"timestamp":"2025-01-15T10:31:00Z","message":{{"id":"msg_2","model":"claude-3-5-sonnet-20241022","usage":{{"input_tokens":150,"output_tokens":250}}}},"cost_usd":0.004,"request_id":"req_2"}}"#).unwrap();
     writeln!(file, r#"{{"timestamp":"2025-01-15T10:32:00Z","message":{{"id":"msg_3","model":"claude-3-5-sonnet-20241022","usage":{{"inputTokens":200,"outputTokens":300}}}},"cost":0.005,"req_id":"req_3","newField":"future_value"}}"#).unwrap();
+
+    // Set up test environment
+    std::env::set_var("CLAUDE_HOME", temp_dir.path());
 
     let mut analyzer = ClaudeUsageAnalyzer::new();
     let options = ProcessOptions {
@@ -228,10 +257,14 @@ async fn test_e2e_keeper_schema_resilience() {
     assert!(result.is_ok(), "Keeper should handle schema variations");
     let sessions = result.unwrap();
     assert!(!sessions.is_empty(), "Should parse all variations");
+
+    // Clean up
+    // Cleanup removed
 }
 
 #[tokio::test]
 async fn test_e2e_date_filtering() {
+    // Config reset removed
     let temp_dir = create_mock_claude_structure();
     let claude_path = temp_dir.path().join(".claude");
 
@@ -246,6 +279,9 @@ async fn test_e2e_date_filtering() {
     writeln!(file, r#"{{"timestamp":"2024-01-10T10:00:00Z","message":{{"id":"msg_old","model":"claude-3-5-sonnet-20241022","usage":{{"input_tokens":100,"output_tokens":200}}}},"costUSD":0.003,"requestId":"req_old"}}"#).unwrap();
     writeln!(file, r#"{{"timestamp":"2025-01-15T10:00:00Z","message":{{"id":"msg_mid","model":"claude-3-5-sonnet-20241022","usage":{{"input_tokens":100,"output_tokens":200}}}},"costUSD":0.003,"requestId":"req_mid"}}"#).unwrap();
     writeln!(file, r#"{{"timestamp":"2024-01-20T10:00:00Z","message":{{"id":"msg_new","model":"claude-3-5-sonnet-20241022","usage":{{"input_tokens":100,"output_tokens":200}}}},"costUSD":0.003,"requestId":"req_new"}}"#).unwrap();
+
+    // Set up test environment
+    std::env::set_var("CLAUDE_HOME", temp_dir.path());
 
     let mut analyzer = ClaudeUsageAnalyzer::new();
 
@@ -272,26 +308,39 @@ async fn test_e2e_date_filtering() {
 
     assert!(result.is_ok(), "Date filtering should work");
     // Should only include the middle entry
+
+    // Clean up
+    // Cleanup removed
 }
 
 #[tokio::test]
 async fn test_e2e_deduplication() {
-    let temp_dir = create_mock_claude_structure();
+    // Reset config first to ensure clean state
+    // Config reset removed
+    
+    // Create isolated temporary directory for this specific test
+    let temp_dir = TempDir::new().unwrap();
     let claude_path = temp_dir.path().join(".claude");
 
+    // Create ONLY the project directory we need (no VMs, no other projects)
     let project_path = claude_path.join("projects").join("test_project_dedup");
     fs::create_dir_all(&project_path).unwrap();
 
     let jsonl_path = project_path.join("conversation_dedup.jsonl");
     let mut file = fs::File::create(&jsonl_path).unwrap();
 
-    // Create duplicate entries with same messageId and requestId
+    // Create duplicate entries with same messageId and requestId (using current date)
     for _ in 0..3 {
-        writeln!(file, r#"{{"timestamp":"2025-01-15T10:30:00Z","message":{{"id":"msg_duplicate","model":"claude-3-5-sonnet-20241022","usage":{{"input_tokens":100,"output_tokens":200}}}},"costUSD":0.003,"requestId":"req_duplicate"}}"#).unwrap();
+        writeln!(file, r#"{{"timestamp":"2025-08-19T10:30:00Z","message":{{"id":"msg_duplicate","model":"claude-3-5-sonnet-20241022","usage":{{"input_tokens":100,"output_tokens":200}}}},"costUSD":0.003,"requestId":"req_duplicate"}}"#).unwrap();
     }
 
     // Add unique entry
-    writeln!(file, r#"{{"timestamp":"2025-01-15T10:31:00Z","message":{{"id":"msg_unique","model":"claude-3-5-sonnet-20241022","usage":{{"input_tokens":150,"output_tokens":250}}}},"costUSD":0.004,"requestId":"req_unique"}}"#).unwrap();
+    writeln!(file, r#"{{"timestamp":"2025-08-19T10:31:00Z","message":{{"id":"msg_unique","model":"claude-3-5-sonnet-20241022","usage":{{"input_tokens":150,"output_tokens":250}}}},"costUSD":0.004,"requestId":"req_unique"}}"#).unwrap();
+
+    drop(file); // Close file to ensure all data is written
+
+    // Set up test environment
+    std::env::set_var("CLAUDE_HOME", temp_dir.path());
 
     let mut analyzer = ClaudeUsageAnalyzer::new();
     let options = ProcessOptions {
@@ -311,8 +360,20 @@ async fn test_e2e_deduplication() {
 
     // Should have deduplicated the duplicate entries
     let total_cost: f64 = sessions.iter().map(|s| s.total_cost).sum();
-    assert!(
-        total_cost < 0.013,
-        "Should have deduplicated entries (cost should be ~0.007, not 0.013)"
-    );
+    // Verify that we actually processed the right data by checking details
+    if !sessions.is_empty() {
+        println!("Session cost: {}, expected: ~0.007", total_cost);
+        
+        // More detailed assertion with better error message
+        assert!(
+            (total_cost - 0.007).abs() < 0.001,
+            "Expected cost ~0.007 but got {} - deduplication may not be working correctly", 
+            total_cost
+        );
+    } else {
+        panic!("No sessions found - test setup may be incorrect");
+    }
+
+    // Clean up
+    // Cleanup removed
 }

@@ -71,34 +71,3 @@ pub struct LiveUpdate {
     pub timestamp: SystemTime,
 }
 
-/// Session statistics for live updates
-#[derive(Debug, Clone)]
-pub struct SessionStats {
-    pub session_id: String,
-    pub project_path: String,
-    pub input_tokens: u32,
-    pub output_tokens: u32,
-    pub cache_creation_tokens: u32,
-    pub cache_read_tokens: u32,
-    pub total_cost: f64,
-}
-
-impl SessionStats {
-    pub fn total_tokens(&self) -> u32 {
-        self.input_tokens + self.output_tokens + self.cache_creation_tokens + self.cache_read_tokens
-    }
-}
-
-impl From<SessionData> for SessionStats {
-    fn from(data: SessionData) -> Self {
-        Self {
-            session_id: data.session_id,
-            project_path: data.project_path,
-            input_tokens: data.input_tokens,
-            output_tokens: data.output_tokens,
-            cache_creation_tokens: data.cache_creation_tokens,
-            cache_read_tokens: data.cache_read_tokens,
-            total_cost: data.total_cost,
-        }
-    }
-}

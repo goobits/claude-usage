@@ -1,3 +1,4 @@
+use crate::config::get_config;
 use crate::keeper_integration::KeeperIntegration;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -27,12 +28,13 @@ impl FileDiscovery {
     /// Discover all Claude installation paths (main + VMs)
     pub fn discover_claude_paths(&self, exclude_vms: bool) -> Result<Vec<PathBuf>> {
         let mut paths = Vec::new();
+        let config = get_config();
 
-        // Get home directory
-        let home_dir = dirs::home_dir().context("Could not find home directory")?;
-
+        // Get Claude home directory from config (respects CLAUDE_HOME env var)
+        let claude_home = &config.paths.claude_home;
+        
         // Main Claude path
-        let main_path = home_dir.join(".claude");
+        let main_path = claude_home.join(".claude");
         if main_path.join("projects").exists() {
             paths.push(main_path.clone());
         }
@@ -58,6 +60,7 @@ impl FileDiscovery {
     /// Find all JSONL files in the given Claude paths
     pub fn find_jsonl_files(&self, claude_paths: &[PathBuf]) -> Result<Vec<(PathBuf, PathBuf)>> {
         let mut file_tuples = Vec::new();
+        let mut seen_files = std::collections::HashSet::new();
 
         for claude_path in claude_paths {
             let projects_dir = claude_path.join("projects");
@@ -75,8 +78,11 @@ impl FileDiscovery {
             for pattern in patterns {
                 if let Ok(paths) = glob(&pattern.to_string_lossy()) {
                     for entry in paths.flatten() {
-                        if let Some(session_dir) = entry.parent() {
-                            file_tuples.push((entry.clone(), session_dir.to_path_buf()));
+                        // Deduplicate files that match multiple patterns
+                        if seen_files.insert(entry.clone()) {
+                            if let Some(session_dir) = entry.parent() {
+                                file_tuples.push((entry.clone(), session_dir.to_path_buf()));
+                            }
                         }
                     }
                 }

@@ -17,6 +17,7 @@ mod parquet;
 mod parser;
 mod parser_wrapper;
 mod pricing;
+mod reports;
 mod session_utils;
 mod timestamp_parser;
 
@@ -135,7 +136,52 @@ async fn main() -> Result<()> {
                 Ok(_) => Ok(()),
                 Err(e) => {
                     error!(error = %e, "Live mode failed");
-                    eprintln!("Error: {}", e);
+                    
+                    // Provide user-friendly error messages with actionable guidance
+                    let error_msg = e.to_string();
+                    
+                    if error_msg.contains("claude-keeper not found") {
+                        eprintln!("❌ Claude Keeper Not Found");
+                        eprintln!();
+                        eprintln!("Claude Usage Live requires claude-keeper to be installed.");
+                        eprintln!("Please install it first:");
+                        eprintln!();
+                        eprintln!("📦 Installation options:");
+                        eprintln!("   • Visit: https://github.com/mufeedvh/claude-keeper");
+                        eprintln!("   • Or use: cargo install claude-keeper");
+                        eprintln!();
+                        eprintln!("After installation, try running 'claude-usage live' again.");
+                    } else if error_msg.contains("permission") {
+                        eprintln!("❌ Permission Error");
+                        eprintln!();
+                        eprintln!("Claude-keeper cannot be executed due to permission issues.");
+                        eprintln!();
+                        eprintln!("🔧 Try these solutions:");
+                        eprintln!("   • Make sure claude-keeper is executable: chmod +x $(which claude-keeper)");
+                        eprintln!("   • Check if claude-keeper is in your PATH");
+                        eprintln!("   • Run with appropriate permissions");
+                    } else if error_msg.contains("backup directory") || error_msg.contains("No such file") {
+                        eprintln!("❌ Configuration Issue");
+                        eprintln!();
+                        eprintln!("Unable to access Claude conversation data.");
+                        eprintln!();
+                        eprintln!("💡 Possible solutions:");
+                        eprintln!("   • Make sure Claude Desktop is installed and has been used");
+                        eprintln!("   • Check that ~/.claude/backups directory exists");
+                        eprintln!("   • Try running: claude-keeper backup");
+                        eprintln!("   • Or use: claude-usage live --no-baseline");
+                    } else {
+                        eprintln!("❌ Live Mode Failed");
+                        eprintln!();
+                        eprintln!("Error: {}", e);
+                        eprintln!();
+                        eprintln!("💡 Troubleshooting tips:");
+                        eprintln!("   • Check that claude-keeper is installed and working");
+                        eprintln!("   • Verify Claude Desktop is properly configured");
+                        eprintln!("   • Try running with --no-baseline flag");
+                        eprintln!("   • Check the logs for more details");
+                    }
+                    
                     Err(e)
                 }
             }

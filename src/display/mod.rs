@@ -7,7 +7,7 @@
 //! ## Core Components
 //!
 //! - [`LiveDisplay`] - Core display state with ring buffer for recent entries
-//! - [`DisplayManager`] - Terminal UI manager using ratatui with crossterm backend
+//! - [`LiveDisplayManager`] - Terminal UI manager using ratatui with crossterm backend
 //! - [`RunningTotals`] - Running totals for cost, tokens, and sessions
 //! - [`SessionActivity`] - Recent activity tracking with timestamps
 //!
@@ -64,7 +64,6 @@ pub use widgets::*;
 
 use crate::live::{BaselineSummary, LiveUpdate};
 use anyhow::Result;
-use std::collections::VecDeque;
 use std::time::{Duration, SystemTime};
 use tokio::sync::mpsc;
 
@@ -86,7 +85,7 @@ pub async fn run_display(
     baseline: BaselineSummary,
     update_receiver: mpsc::Receiver<LiveUpdate>
 ) -> Result<()> {
-    let mut display_manager = DisplayManager::new(baseline, update_receiver).await?;
+    let mut display_manager = LiveDisplayManager::new(baseline, update_receiver).await?;
     display_manager.run().await
 }
 

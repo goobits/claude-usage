@@ -1,0 +1,4 @@
+{"timestamp":"2025-01-15T10:30:00Z","message":{"id":"msg_duplicate","model":"claude-3-5-sonnet-20241022","usage":{"input_tokens":100,"output_tokens":200}},"costUSD":0.003,"requestId":"req_duplicate"}
+{"timestamp":"2025-01-15T10:30:00Z","message":{"id":"msg_duplicate","model":"claude-3-5-sonnet-20241022","usage":{"input_tokens":100,"output_tokens":200}},"costUSD":0.003,"requestId":"req_duplicate"}
+{"timestamp":"2025-01-15T10:30:00Z","message":{"id":"msg_duplicate","model":"claude-3-5-sonnet-20241022","usage":{"input_tokens":100,"output_tokens":200}},"costUSD":0.003,"requestId":"req_duplicate"}
+{"timestamp":"2025-01-15T10:31:00Z","message":{"id":"msg_unique","model":"claude-3-5-sonnet-20241022","usage":{"input_tokens":150,"output_tokens":250}},"costUSD":0.004,"requestId":"req_unique"}

@@ -1,7 +1,5 @@
 //! Validation test to ensure all integration components work together
 
-use std::path::Path;
-
 #[test]
 fn test_unified_parser_import() {
     // Validate that UnifiedParser can be imported and instantiated
@@ -97,7 +95,6 @@ fn test_test_utilities_work() {
 #[test]
 fn test_path_utilities() {
     // Validate path handling utilities work correctly
-    use std::path::{Path, PathBuf};
     use tempfile::TempDir;
 
     let temp_dir = TempDir::new().unwrap();

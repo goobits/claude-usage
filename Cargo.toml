@@ -20,12 +20,10 @@ path = "src/main.rs"
 # Core CLI and error handling
 clap = { version = "4.4", features = ["derive", "color", "suggestions", "cargo"] }
 anyhow = "1.0"
-thiserror = "1.0"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-serde_yaml = "0.9"
 toml = "0.8"
 
 # Async runtime
@@ -33,16 +31,12 @@ tokio = { version = "1.0", features = ["full"] }
 
 # File system and paths
 dirs = "6.0"
-walkdir = "2.4"
 glob = "0.3"
 
 # Date and time
 chrono = { version = "0.4", features = ["serde"] }
 
 # Terminal UI
-console = "0.15"
-indicatif = "0.17"
-tabled = "0.15"
 colored = "2.0"
 crossterm = "0.27"
 ratatui = "0.26"
@@ -51,8 +45,7 @@ ratatui = "0.26"
 dashmap = "5.5"
 rayon = "1.8"
 
-# Utilities
-regex = "1.10"
+# HTTP client for pricing API
 reqwest = { version = "0.11", features = ["json"] }
 
 # Structured logging
@@ -72,6 +65,7 @@ criterion = "0.5"
 
 [features]
 default = []
+keeper-integration = []
 
 [profile.release]
 strip = true

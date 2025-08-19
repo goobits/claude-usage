@@ -12,59 +12,46 @@ use crate::live::LiveUpdate;
 
 /// Run live mode with optional baseline
 pub async fn run_live_mode(no_baseline: bool) -> Result<()> {
+    // Welcome message for users
+    println!("🚀 Starting Claude Usage Live Monitor");
+    println!();
+    
+    if no_baseline {
+        println!("⚠️  Running without baseline data (--no-baseline specified)");
+        println!("💡 This means you'll only see new usage from this point forward");
+    } else {
+        println!("📊 Preparing live monitoring with baseline data...");
+        println!("🔄 This may take a moment while we load your conversation history");
+    }
+    println!();
+
     info!(no_baseline, "Starting live mode");
 
     // Create communication channel for updates
-    let (tx, mut rx) = mpsc::channel::<LiveUpdate>(100);
+    let (tx, rx) = mpsc::channel::<LiveUpdate>(100);
 
-    // Create and start the orchestrator
-    let mut orchestrator = LiveOrchestrator::new(no_baseline)?;
+    // Create the orchestrator
+    let mut orchestrator = LiveOrchestrator::new(no_baseline).await?;
+    
+    // Extract baseline before moving orchestrator into spawn task
+    let baseline = orchestrator.get_baseline();
     
     // Start the orchestrator in a background task
-    let mut orchestrator_handle = tokio::spawn(async move {
+    tokio::spawn(async move {
         if let Err(e) = orchestrator.run(tx).await {
             error!(error = %e, "Live orchestrator failed");
         }
     });
 
-    // Main event loop - receive and process updates
-    loop {
-        tokio::select! {
-            // Handle incoming updates
-            update = rx.recv() => {
-                match update {
-                    Some(update) => {
-                        // For now, just log the update
-                        // Diana will implement the display logic
-                        info!(
-                            session_id = %update.entry.message.id,
-                            tokens = update.session_stats.total_tokens(),
-                            cost = update.session_stats.total_cost,
-                            "Received live update"
-                        );
-                    }
-                    None => {
-                        // Channel closed, orchestrator finished
-                        break;
-                    }
-                }
-            }
-            
-            // Handle orchestrator completion
-            result = &mut orchestrator_handle => {
-                match result {
-                    Ok(_) => {
-                        info!("Live mode orchestrator completed successfully");
-                    }
-                    Err(e) => {
-                        error!(error = %e, "Live mode orchestrator task failed");
-                    }
-                }
-                break;
-            }
-        }
-    }
+    // Success message before starting display
+    println!("✅ Live monitoring ready! Starting real-time dashboard...");
+    println!("💡 Use Ctrl+C to exit");
+    println!();
 
+    // Run the display with baseline and receiver
+    crate::display::run_display(baseline, rx).await?;
+
+    println!("👋 Live monitoring stopped. Thank you for using Claude Usage!");
     info!("Live mode completed");
     Ok(())
 }

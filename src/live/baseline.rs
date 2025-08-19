@@ -4,6 +4,7 @@
 //! files created by claude-keeper. This provides the initial state for live mode.
 
 use anyhow::{Context, Result};
+use std::time::{Duration, SystemTime};
 use tracing::{debug, info, warn};
 
 use crate::config::get_config;
@@ -54,7 +55,7 @@ pub async fn refresh_baseline() -> Result<BaselineSummary> {
         .args(&["backup", "--quiet"])
         .output()
         .await
-        .context("Failed to execute claude-keeper backup")?;
+        .context("Failed to execute claude-keeper backup. Make sure claude-keeper is installed and accessible.")?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -63,10 +64,79 @@ pub async fn refresh_baseline() -> Result<BaselineSummary> {
             stderr = %stderr,
             "Claude-keeper backup command failed"
         );
+        
+        // Provide user-friendly error context
+        if stderr.contains("command not found") || stderr.contains("not found") {
+            return Err(anyhow::anyhow!(
+                "claude-keeper not found. Please install claude-keeper first:\n\
+                 Visit https://github.com/mufeedvh/claude-keeper for installation instructions"
+            ));
+        } else if stderr.contains("permission") {
+            return Err(anyhow::anyhow!(
+                "Permission denied running claude-keeper.\n\
+                 Make sure claude-keeper is executable and you have proper permissions"
+            ));
+        }
+        
         // Continue with existing baseline rather than failing
+        println!("⚠️  Backup command failed, trying to load existing data...");
         return load_baseline_summary();
     }
 
+    println!("✅ Auto-backup completed successfully");
+    
     // Reload the baseline data
     load_baseline_summary()
+}
+
+/// Check if baseline should be refreshed (missing or stale)
+pub fn should_refresh_baseline() -> bool {
+    let config = get_config();
+    let backup_dir = config.paths.claude_home.join("backups");
+    
+    // If backup directory doesn't exist, we definitely need to refresh
+    if !backup_dir.exists() {
+        debug!("Backup directory doesn't exist, baseline refresh needed");
+        return true;
+    }
+    
+    // Check for recent parquet files (within last 5 minutes)
+    let stale_threshold = Duration::from_secs(5 * 60); // 5 minutes
+    let now = SystemTime::now();
+    
+    match std::fs::read_dir(&backup_dir) {
+        Ok(entries) => {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() && 
+                   path.extension()
+                       .and_then(|ext| ext.to_str())
+                       .map(|ext| ext.eq_ignore_ascii_case("parquet"))
+                       .unwrap_or(false)
+                {
+                    if let Ok(metadata) = std::fs::metadata(&path) {
+                        if let Ok(modified) = metadata.modified() {
+                            if let Ok(age) = now.duration_since(modified) {
+                                if age <= stale_threshold {
+                                    debug!(
+                                        file = %path.display(),
+                                        age_secs = age.as_secs(),
+                                        "Found recent parquet file, no refresh needed"
+                                    );
+                                    return false; // Found recent file, no refresh needed
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            warn!(error = %e, "Failed to read backup directory, assuming refresh needed");
+            return true;
+        }
+    }
+    
+    debug!("No recent parquet files found, baseline refresh needed");
+    true
 }

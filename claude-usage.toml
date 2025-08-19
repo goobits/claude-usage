@@ -32,8 +32,7 @@ vms_directory = "~/.claude/vms"
 log_directory = "logs"
 
 [live]
-baseline_ttl = "5m"
-ring_buffer_size = 100
-update_interval = "1s"
+startup_timeout_secs = 30
+max_restart_attempts = 3
+update_channel_buffer = 100
 claude_keeper_path = "claude-keeper"
-auto_backup = true
