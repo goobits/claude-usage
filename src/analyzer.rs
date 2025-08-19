@@ -117,12 +117,7 @@ impl ClaudeUsageAnalyzer {
             // Check if we need to refresh the backup
             if should_refresh_baseline() {
                 // Run backup if needed (this is async)
-                if let Ok(baseline) = refresh_baseline().await {
-                    baseline
-                } else {
-                    // If backup fails, continue without baseline
-                    crate::live::BaselineSummary::default()
-                }
+                refresh_baseline().await.unwrap_or_default()
             } else {
                 // Load existing baseline
                 load_baseline_summary().unwrap_or_default()

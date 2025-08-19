@@ -1,6 +1,6 @@
 use crate::config::get_config;
 use crate::keeper_integration::KeeperIntegration;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use chrono::{DateTime, Utc};
 use glob::glob;
 use std::fs::{metadata, File};

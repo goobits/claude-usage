@@ -129,7 +129,7 @@ impl LiveDisplay {
 
             let project_name = session.project_path
                 .split('/')
-                .last()
+                .next_back()
                 .unwrap_or(&session.project_path);
 
             Some(format!(

@@ -155,7 +155,7 @@ impl SessionActivity {
         // Extract project name from path (take last component)
         let project = update.session_stats.project_path
             .split('/')
-            .last()
+            .next_back()
             .unwrap_or(&update.session_stats.project_path)
             .to_string();
 
