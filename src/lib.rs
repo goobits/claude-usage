@@ -12,8 +12,6 @@
 //!   memory management
 //! - **Intelligent deduplication**: Prevents double-counting of usage data with time-windowed
 //!   deduplication engine
-//! - **Real-time monitoring**: Live monitoring of active Claude sessions with token limits
-//!   and cost tracking
 //! - **Flexible output formats**: JSON and human-readable reports with daily/monthly aggregation
 //! - **Cost calculation**: Automatic pricing integration with fallback support
 //!
@@ -25,8 +23,8 @@
 //! - [`parser`] - File discovery and JSONL parsing with streaming support
 //! - [`analyzer`] - Main analysis engine that orchestrates parsing and aggregation
 //! - [`dedup`] - Deduplication engine for handling overlapping usage data
-//! - [`display`] - Output formatting for various report types
-//! - [`monitor`] - Real-time monitoring and session tracking
+//! - [`display`] - Terminal UI and live display components for real-time monitoring
+//! - [`reports`] - Output formatting for various report types
 //! - [`pricing`] - Cost calculation and pricing data management
 //! - [`config`] - Configuration management with environment variable support
 //! - [`logging`] - Structured logging with JSON and pretty-print formats
@@ -72,12 +70,19 @@ pub mod file_discovery;
 pub mod logging;
 pub mod memory;
 pub mod models;
-pub mod monitor;
 pub mod parser;
 pub mod parser_wrapper;
 pub mod pricing;
+pub mod reports;
 pub mod session_utils;
 pub mod timestamp_parser;
+
+// Live mode modules
+pub mod live;
+pub mod parquet;
+
+// Command modules
+pub mod commands;
 
 pub use analyzer::ClaudeUsageAnalyzer;
 pub use models::*;

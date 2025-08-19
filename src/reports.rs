@@ -77,7 +77,7 @@
 //! ## Usage Example
 //!
 //! ```rust
-//! use claude_usage::display::DisplayManager;
+//! use claude_usage::reports::DisplayManager;
 //!
 //! let display_manager = DisplayManager::new();
 //! let sessions = vec![/* session data */];

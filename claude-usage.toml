@@ -30,3 +30,10 @@ timestamp_format = "%Y-%m-%d %H:%M:%S"
 claude_home = "~/.claude"
 vms_directory = "~/.claude/vms"
 log_directory = "logs"
+
+[live]
+baseline_ttl = "5m"
+ring_buffer_size = 100
+update_interval = "1s"
+claude_keeper_path = "claude-keeper"
+auto_backup = true

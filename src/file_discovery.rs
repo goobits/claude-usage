@@ -282,7 +282,7 @@ impl FileDiscovery {
         file_tuples
     }
 
-    /// Find session blocks files for live monitoring
+    /// Find session blocks files
     pub fn find_session_blocks_files(&self, claude_paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
         let mut block_files = Vec::new();
 

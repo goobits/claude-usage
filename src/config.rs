@@ -34,6 +34,9 @@ pub struct Config {
 
     /// Paths configuration
     pub paths: PathsConfig,
+
+    /// Live mode configuration
+    pub live: LiveConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,6 +82,14 @@ pub struct PathsConfig {
     pub log_directory: PathBuf,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LiveConfig {
+    pub startup_timeout_secs: u64,
+    pub max_restart_attempts: u32,
+    pub update_channel_buffer: usize,
+    pub claude_keeper_path: String,
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -117,6 +128,12 @@ impl Default for Config {
                     .join(".claude")
                     .join("vms"),
                 log_directory: PathBuf::from("logs"),
+            },
+            live: LiveConfig {
+                startup_timeout_secs: 30,
+                max_restart_attempts: 3,
+                update_channel_buffer: 100,
+                claude_keeper_path: "claude-keeper".to_string(),
             },
         }
     }
@@ -216,6 +233,26 @@ impl Config {
         }
         if let Ok(val) = env::var("CLAUDE_LOG_DIR") {
             self.paths.log_directory = PathBuf::from(val);
+        }
+
+        // Live mode overrides
+        if let Ok(val) = env::var("CLAUDE_KEEPER_PATH") {
+            self.live.claude_keeper_path = val;
+        }
+        if let Ok(val) = env::var("CLAUDE_USAGE_LIVE_TIMEOUT") {
+            self.live.startup_timeout_secs = val
+                .parse()
+                .context("Invalid CLAUDE_USAGE_LIVE_TIMEOUT")?;
+        }
+        if let Ok(val) = env::var("CLAUDE_USAGE_LIVE_MAX_RESTARTS") {
+            self.live.max_restart_attempts = val
+                .parse()
+                .context("Invalid CLAUDE_USAGE_LIVE_MAX_RESTARTS")?;
+        }
+        if let Ok(val) = env::var("CLAUDE_USAGE_LIVE_BUFFER_SIZE") {
+            self.live.update_channel_buffer = val
+                .parse()
+                .context("Invalid CLAUDE_USAGE_LIVE_BUFFER_SIZE")?;
         }
 
         Ok(())

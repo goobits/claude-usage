@@ -12,7 +12,7 @@
 //! - Discovers Claude instances across local projects and virtual machines
 //! - Identifies and filters JSONL files based on date ranges
 //! - Coordinates parallel parsing with configurable batch sizes
-//! - Handles both regular analysis and live monitoring modes
+//! - Handles regular analysis modes
 //!
 //! ### Data Processing Pipeline
 //! 1. **Discovery**: Finds Claude installation directories and JSONL files
@@ -25,7 +25,6 @@
 //! ### Command Processing
 //! - **daily**: Generates daily usage reports with project breakdowns
 //! - **monthly**: Creates monthly usage summaries
-//! - **live**: Real-time monitoring of active Claude sessions
 //!
 //! ## Key Types
 //!
@@ -39,8 +38,6 @@
 //! - [`FileParser`] - Provides file discovery and basic parsing utilities
 //! - [`DeduplicationEngine`] - Prevents double-counting of usage data
 //! - [`DisplayManager`] - Formats and presents analysis results
-//! - [`LiveMonitor`] - Provides real-time session monitoring
-//!
 //! ## Usage Example
 //!
 //! ```rust
@@ -73,9 +70,8 @@
 //! - **Early Exit Optimization**: Can stop processing early when limits are reached
 
 use crate::dedup::{DeduplicationEngine, ProcessOptions};
-use crate::display::DisplayManager;
+use crate::reports::DisplayManager;
 use crate::models::*;
-use crate::monitor::LiveMonitor;
 use crate::parser::FileParser;
 use crate::parser_wrapper::UnifiedParser;
 use anyhow::Result;
@@ -86,7 +82,6 @@ pub struct ClaudeUsageAnalyzer {
     file_parser: FileParser,
     dedup_engine: DeduplicationEngine,
     display_manager: DisplayManager,
-    live_monitor: LiveMonitor,
 }
 
 impl Default for ClaudeUsageAnalyzer {
@@ -102,7 +97,6 @@ impl ClaudeUsageAnalyzer {
             file_parser: FileParser::new(),
             dedup_engine: DeduplicationEngine::new(),
             display_manager: DisplayManager::new(),
-            live_monitor: LiveMonitor::new(),
         }
     }
 
@@ -170,43 +164,34 @@ impl ClaudeUsageAnalyzer {
     }
 
     pub async fn run_command(&mut self, command: &str, options: ProcessOptions) -> Result<()> {
-        match command {
-            "live" => {
-                self.live_monitor
-                    .run_live_monitor(options.json_output, options.snapshot, options.exclude_vms)
-                    .await
+        let data = self.aggregate_data(command, options.clone()).await?;
+
+        if data.is_empty() {
+            warn!("No Claude usage data found across all instances");
+            if options.json_output {
+                println!("[]");
+            } else {
+                println!("No Claude usage data found across all instances.");
             }
+            return Ok(());
+        }
+
+        match command {
+            "daily" => self.display_manager.display_daily(
+                &data,
+                options.limit,
+                options.json_output,
+            ),
+            "monthly" => self.display_manager.display_monthly(
+                &data,
+                options.limit,
+                options.json_output,
+            ),
             _ => {
-                let data = self.aggregate_data(command, options.clone()).await?;
-
-                if data.is_empty() {
-                    warn!("No Claude usage data found across all instances");
-                    if options.json_output {
-                        println!("[]");
-                    } else {
-                        println!("No Claude usage data found across all instances.");
-                    }
-                    return Ok(());
-                }
-
-                match command {
-                    "daily" => self.display_manager.display_daily(
-                        &data,
-                        options.limit,
-                        options.json_output,
-                    ),
-                    "monthly" => self.display_manager.display_monthly(
-                        &data,
-                        options.limit,
-                        options.json_output,
-                    ),
-                    _ => {
-                        anyhow::bail!("Unknown command: {}", command);
-                    }
-                }
-
-                Ok(())
+                anyhow::bail!("Unknown command: {}", command);
             }
         }
+
+        Ok(())
     }
 }

@@ -3,15 +3,17 @@ use clap::{Parser, Subcommand};
 use tracing::error;
 
 mod analyzer;
+mod commands;
 mod config;
 mod dedup;
 mod display;
 mod file_discovery;
 mod keeper_integration;
+mod live;
 mod logging;
 mod memory;
 mod models;
-mod monitor;
+mod parquet;
 mod parser;
 mod parser_wrapper;
 mod pricing;
@@ -69,17 +71,11 @@ enum Commands {
         #[arg(long)]
         exclude_vms: bool,
     },
-    /// Show live monitoring
+    /// Real-time usage monitoring via claude-keeper integration
     Live {
-        /// Output in JSON format
+        /// Skip loading baseline data from parquet backups
         #[arg(long)]
-        json: bool,
-        /// Show live data snapshot (single view, no monitoring loop)
-        #[arg(long)]
-        snapshot: bool,
-        /// Exclude VMs directory from analysis
-        #[arg(long)]
-        exclude_vms: bool,
+        no_baseline: bool,
     },
 }
 
@@ -134,31 +130,14 @@ async fn main() -> Result<()> {
                 Err(e) => handle_error(e, json),
             }
         }
-        Commands::Live {
-            json,
-            snapshot,
-            exclude_vms,
-        } => {
-            if json && !snapshot {
-                return Err(anyhow::anyhow!(
-                    "Live monitoring does not support --json output"
-                ));
-            }
-
-            let mut analyzer = ClaudeUsageAnalyzer::new();
-            let options = ProcessOptions {
-                command: "live".to_string(),
-                json_output: json,
-                limit: None,
-                since_date: None,
-                until_date: None,
-                snapshot,
-                exclude_vms,
-            };
-
-            match analyzer.run_command("live", options).await {
+        Commands::Live { no_baseline } => {
+            match commands::live::run_live_mode(no_baseline).await {
                 Ok(_) => Ok(()),
-                Err(e) => handle_error(e, json),
+                Err(e) => {
+                    error!(error = %e, "Live mode failed");
+                    eprintln!("Error: {}", e);
+                    Err(e)
+                }
             }
         }
     }

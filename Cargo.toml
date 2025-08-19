@@ -44,6 +44,8 @@ console = "0.15"
 indicatif = "0.17"
 tabled = "0.15"
 colored = "2.0"
+crossterm = "0.27"
+ratatui = "0.26"
 
 # Performance and concurrency
 dashmap = "5.5"
