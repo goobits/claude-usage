@@ -173,15 +173,53 @@ impl Config {
         Ok(config)
     }
 
+    /// Expand ~ in path strings
+    fn expand_path(path_str: &str) -> PathBuf {
+        if path_str.starts_with("~") {
+            if let Some(home) = dirs::home_dir() {
+                if path_str == "~" {
+                    return home;
+                } else if path_str.starts_with("~/") {
+                    return home.join(&path_str[2..]);
+                }
+            }
+        }
+        PathBuf::from(path_str)
+    }
+
     /// Load configuration from TOML file
+    #[cfg(feature = "basic")]
     pub fn load_from_file(path: &Path) -> Result<Self> {
         let content = fs::read_to_string(path)
             .with_context(|| format!("Failed to read config file: {}", path.display()))?;
 
-        let config: Config = toml::from_str(&content)
+        let mut config: Config = toml::from_str(&content)
             .with_context(|| format!("Failed to parse config file: {}", path.display()))?;
+        
+        // Expand ~ in path strings
+        config.expand_paths();
 
         Ok(config)
+    }
+    
+    #[cfg(not(feature = "basic"))]
+    pub fn load_from_file(_path: &Path) -> Result<Self> {
+        // Return default config when TOML support is not compiled in
+        Ok(Self::default())
+    }
+
+    /// Expand ~ in all path fields
+    fn expand_paths(&mut self) {
+        // Convert paths to strings, expand, then back to PathBuf
+        if let Some(claude_home_str) = self.paths.claude_home.to_str() {
+            self.paths.claude_home = Self::expand_path(claude_home_str);
+        }
+        if let Some(vms_dir_str) = self.paths.vms_directory.to_str() {
+            self.paths.vms_directory = Self::expand_path(vms_dir_str);
+        }
+        if let Some(log_dir_str) = self.paths.log_directory.to_str() {
+            self.paths.log_directory = Self::expand_path(log_dir_str);
+        }
     }
 
     /// Apply environment variable overrides
@@ -227,15 +265,15 @@ impl Config {
             self.dedup.enabled = val.parse().context("Invalid CLAUDE_USAGE_DEDUP_ENABLED")?;
         }
 
-        // Path overrides
+        // Path overrides (with ~ expansion)
         if let Ok(val) = env::var("CLAUDE_HOME") {
-            self.paths.claude_home = PathBuf::from(val);
+            self.paths.claude_home = Self::expand_path(&val);
         }
         if let Ok(val) = env::var("CLAUDE_VMS_DIR") {
-            self.paths.vms_directory = PathBuf::from(val);
+            self.paths.vms_directory = Self::expand_path(&val);
         }
         if let Ok(val) = env::var("CLAUDE_LOG_DIR") {
-            self.paths.log_directory = PathBuf::from(val);
+            self.paths.log_directory = Self::expand_path(&val);
         }
 
         // Live mode overrides
@@ -303,6 +341,7 @@ impl Config {
 
     /// Save current configuration to file
     #[allow(dead_code)]
+    #[cfg(feature = "basic")]
     pub fn save_to_file(&self, path: &Path) -> Result<()> {
         let content = toml::to_string_pretty(self).context("Failed to serialize configuration")?;
 
@@ -312,6 +351,12 @@ impl Config {
         info!(path = %path.display(), "Configuration saved to file");
 
         Ok(())
+    }
+    
+    #[allow(dead_code)]
+    #[cfg(not(feature = "basic"))]
+    pub fn save_to_file(&self, _path: &Path) -> Result<()> {
+        anyhow::bail!("TOML configuration saving not available. Rebuild with --features basic")
     }
 }
 

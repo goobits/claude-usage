@@ -229,6 +229,7 @@ impl From<SessionData> for SessionOutput {
 }
 
 impl TokenCounts {
+    #[allow(dead_code)]
     pub fn total(&self) -> u32 {
         self.input_tokens
             + self.output_tokens

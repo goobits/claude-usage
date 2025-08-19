@@ -13,10 +13,12 @@ use crate::parquet::reader::ParquetSummaryReader;
 
 /// Load baseline summary from parquet backup files
 pub fn load_baseline_summary() -> Result<BaselineSummary> {
-    let config = get_config();
+    let _config = get_config();
     
-    // Get claude-keeper backup directory
-    let backup_dir = config.paths.claude_home.join("backups");
+    // Get claude-keeper backup directory (uses ~/.claude-backup by default)
+    let backup_dir = dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join(".claude-backup");
     
     if !backup_dir.exists() {
         info!(
@@ -91,8 +93,10 @@ pub async fn refresh_baseline() -> Result<BaselineSummary> {
 
 /// Check if baseline should be refreshed (missing or stale)
 pub fn should_refresh_baseline() -> bool {
-    let config = get_config();
-    let backup_dir = config.paths.claude_home.join("backups");
+    let _config = get_config();
+    let backup_dir = dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join(".claude-backup");
     
     // If backup directory doesn't exist, we definitely need to refresh
     if !backup_dir.exists() {

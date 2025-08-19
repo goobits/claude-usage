@@ -3,19 +3,27 @@
 //! This module manages the state for the live display TUI, including the ring buffer
 //! for recent activities, current session tracking, and running totals.
 
+#[cfg(feature = "live")]
 use crate::live::{BaselineSummary, LiveUpdate};
+#[cfg(feature = "live")]
 use crate::models::SessionData;
+#[cfg(feature = "live")]
 use super::{RunningTotals, SessionActivity};
+#[cfg(feature = "live")]
 use std::collections::{HashMap, VecDeque};
+#[cfg(feature = "live")]
 use std::time::{Duration, SystemTime};
 
+#[cfg(feature = "live")]
 /// Maximum number of recent entries to keep in the ring buffer
 const MAX_RECENT_ENTRIES: usize = 100;
 
+#[cfg(feature = "live")]
 /// Core display state for the live monitoring TUI
 #[derive(Debug)]
 pub struct LiveDisplay {
     /// Baseline summary from parquet files
+    #[allow(dead_code)]
     pub baseline: BaselineSummary,
     /// Ring buffer of recent activities (max 100, FIFO)
     pub recent_entries: VecDeque<SessionActivity>,
@@ -31,6 +39,7 @@ pub struct LiveDisplay {
     last_update_time: SystemTime,
 }
 
+#[cfg(feature = "live")]
 impl LiveDisplay {
     /// Create new LiveDisplay from baseline summary
     pub fn new(baseline: BaselineSummary) -> Self {
@@ -213,6 +222,7 @@ mod tests {
         }
     }
 
+    #[cfg(test)]
     #[test]
     fn test_ring_buffer_behavior() {
         let baseline = BaselineSummary::default();

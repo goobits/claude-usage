@@ -94,10 +94,13 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::sync::OnceLock;
 
+#[allow(dead_code)]
 static PRICING_CACHE: OnceLock<Mutex<Option<HashMap<String, PricingData>>>> = OnceLock::new();
 
+#[allow(dead_code)]
 pub struct PricingManager;
 
+#[allow(dead_code)]
 impl PricingManager {
     pub async fn get_pricing_data() -> Result<HashMap<String, PricingData>> {
         // Check cache first
@@ -110,9 +113,13 @@ impl PricingManager {
         }
 
         // Fetch from API
+        #[cfg(feature = "pricing")]
         let pricing = Self::fetch_pricing_data()
             .await
             .unwrap_or_else(|_| Self::get_fallback_pricing());
+        
+        #[cfg(not(feature = "pricing"))]
+        let pricing = Self::get_fallback_pricing();
 
         // Cache the result
         {
@@ -124,6 +131,7 @@ impl PricingManager {
         Ok(pricing)
     }
 
+    #[cfg(feature = "pricing")]
     async fn fetch_pricing_data() -> Result<HashMap<String, PricingData>> {
         let url = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
 
@@ -241,4 +249,36 @@ impl PricingManager {
 
         cost
     }
+}
+
+/// Simple synchronous cost calculation using hardcoded pricing
+/// Used when async pricing API is not available (e.g., in parquet reader)
+pub fn calculate_cost_simple(
+    model: &str,
+    input_tokens: u32,
+    output_tokens: u32,
+    cache_creation_tokens: u32,
+    cache_read_tokens: u32,
+) -> f64 {
+    // Use hardcoded pricing based on model name
+    let (input_cost_per_token, output_cost_per_token) = if model.contains("opus") {
+        (1.5e-05, 7.5e-05) // $15/$75 per 1M tokens
+    } else if model.contains("sonnet") {
+        (3e-06, 1.5e-05) // $3/$15 per 1M tokens  
+    } else if model.contains("haiku") {
+        (2.5e-07, 1.25e-06) // $0.25/$1.25 per 1M tokens
+    } else {
+        // Default to sonnet pricing
+        (3e-06, 1.5e-05)
+    };
+    
+    let mut cost = 0.0;
+    cost += input_tokens as f64 * input_cost_per_token;
+    cost += output_tokens as f64 * output_cost_per_token;
+    
+    // Cache tokens use input pricing
+    cost += cache_creation_tokens as f64 * input_cost_per_token;
+    cost += cache_read_tokens as f64 * input_cost_per_token * 0.1; // Cache read is 10% of input cost
+    
+    cost
 }

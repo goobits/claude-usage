@@ -5,5 +5,3 @@
 //! its own logic and configuration.
 
 pub mod live;
-
-pub use live::run_live_mode;

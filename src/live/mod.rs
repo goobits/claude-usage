@@ -46,6 +46,7 @@ pub struct BaselineSummary {
     /// Number of sessions today from baseline data
     pub sessions_today: u32,
     /// Timestamp of last backup
+    #[allow(dead_code)]
     pub last_backup: SystemTime,
 }
 
@@ -64,10 +65,13 @@ impl Default for BaselineSummary {
 #[derive(Debug, Clone)]
 pub struct LiveUpdate {
     /// The usage entry from claude-keeper
+    #[allow(dead_code)]
     pub entry: UsageEntry,
     /// Current session statistics
+    #[allow(dead_code)]
     pub session_stats: SessionData,
     /// Timestamp when this update was received
+    #[allow(dead_code)]
     pub timestamp: SystemTime,
 }
 

@@ -37,6 +37,7 @@ impl SessionUtils {
 
     /// Parse a session blocks file and return the session blocks
     /// Uses claude-keeper subprocess to read and parse the file
+    #[allow(dead_code)]
     pub fn parse_session_blocks_file(
         file_path: &Path,
         keeper: &KeeperIntegration,
@@ -48,7 +49,7 @@ impl SessionUtils {
             .context("Failed to execute claude-keeper stream. Make sure claude-keeper is installed and accessible.")?;
 
         if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
+            let _stderr = String::from_utf8_lossy(&output.stderr);
             // Graceful fallback on failure
             return Ok(Vec::new());
         }

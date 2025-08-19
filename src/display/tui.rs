@@ -114,8 +114,8 @@ impl LiveDisplayManager {
                                 self.error_message = None;
                             },
                             KeyCode::Down => {
-                                let area = self.terminal.size()?;
-                                let activity_height = area.height.saturating_sub(9) as usize; // Approximate
+                                // Use the last known size or default
+                                let activity_height = 10; // Default scroll amount
                                 self.display_state.scroll_down(activity_height);
                                 // Clear any error message when user interacts
                                 self.error_message = None;
@@ -157,7 +157,7 @@ impl LiveDisplayManager {
     /// Render the current display state
     fn render(&mut self) -> Result<()> {
         self.terminal.draw(|frame| {
-            let area = frame.size();
+            let area = frame.area();
             render_live_display(
                 frame,
                 &self.display_state,
@@ -207,6 +207,7 @@ fn cleanup_terminal(terminal: &mut Terminal<TerminalBackend>) -> Result<()> {
 }
 
 /// Graceful shutdown handler for the display
+#[allow(dead_code)]
 pub async fn handle_shutdown(mut display_manager: LiveDisplayManager) -> Result<()> {
     // Allow some time for final updates
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -218,9 +219,6 @@ pub async fn handle_shutdown(mut display_manager: LiveDisplayManager) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::SessionData;
-    use crate::models::{MessageData, UsageData, UsageEntry};
-    use std::time::SystemTime;
 
 
     #[tokio::test]

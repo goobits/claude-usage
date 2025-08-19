@@ -69,20 +69,13 @@
 //! - **Intelligent Caching**: Deduplication engine maintains time-windowed caches
 //! - **Early Exit Optimization**: Can stop processing early when limits are reached
 
-use crate::dedup::{DeduplicationEngine, ProcessOptions};
+use crate::dedup::ProcessOptions;
 use crate::reports::ReportDisplayManager;
 use crate::models::*;
-use crate::parser::FileParser;
-use crate::parser_wrapper::UnifiedParser;
 use anyhow::Result;
-use std::collections::HashMap;
-use std::time::SystemTime;
 use tracing::warn;
 
 pub struct ClaudeUsageAnalyzer {
-    parser: UnifiedParser,
-    file_parser: FileParser,
-    dedup_engine: DeduplicationEngine,
     display_manager: ReportDisplayManager,
 }
 
@@ -95,9 +88,6 @@ impl Default for ClaudeUsageAnalyzer {
 impl ClaudeUsageAnalyzer {
     pub fn new() -> Self {
         Self {
-            parser: UnifiedParser::new(),
-            file_parser: FileParser::new(),
-            dedup_engine: DeduplicationEngine::new(),
             display_manager: ReportDisplayManager::new(),
         }
     }
@@ -108,117 +98,84 @@ impl ClaudeUsageAnalyzer {
         options: ProcessOptions,
     ) -> Result<Vec<SessionOutput>> {
         // Check and refresh baseline for daily/monthly commands
-        use crate::live::baseline::{should_refresh_baseline, refresh_baseline, load_baseline_summary};
+        use crate::live::baseline::{should_refresh_baseline, refresh_baseline};
+        use crate::parquet::reader::ParquetSummaryReader;
+        use crate::config::get_config;
         
-        // Only use baseline for daily/monthly commands (not for session command)
-        let use_baseline = matches!(_command, "daily" | "monthly");
+        // Only use Parquet data for daily/monthly commands
+        let use_parquet = matches!(_command, "daily" | "monthly");
         
-        let baseline = if use_baseline {
+        if use_parquet {
             // Check if we need to refresh the backup
             if should_refresh_baseline() {
                 // Run backup if needed (this is async)
-                refresh_baseline().await.unwrap_or_default()
-            } else {
-                // Load existing baseline
-                load_baseline_summary().unwrap_or_default()
+                refresh_baseline().await.unwrap_or_default();
             }
-        } else {
-            crate::live::BaselineSummary::default()
-        };
 
-        // Discover Claude paths - use file_parser for discovery
-        let paths = self
-            .file_parser
-            .discover_claude_paths(options.exclude_vms)?;
-
-        if !options.json_output {
-            println!(
-                "🔍 Discovered {} Claude instance{}",
-                paths.len(),
-                if paths.len() == 1 { "" } else { "s" }
-            );
-        }
-
-        // Find all JSONL files - use file_parser for discovery
-        let mut all_jsonl_files = Vec::new();
-        let mut files_filtered = 0;
-
-        for claude_path in &paths {
-            let file_tuples = self.file_parser.find_jsonl_files(std::slice::from_ref(claude_path))?;
-
-            for (jsonl_file, session_dir) in file_tuples {
-                // Pre-filter files by date range - use file_parser for filtering
-                if self.file_parser.should_include_file(
-                    &jsonl_file,
-                    options.since_date.as_ref(),
-                    options.until_date.as_ref(),
-                ) {
-                    // Also check if file is newer than baseline
-                    let should_process = if use_baseline && baseline.last_backup != SystemTime::UNIX_EPOCH {
-                        // Check if file was modified after the baseline backup
-                        jsonl_file.metadata()
-                            .and_then(|m| m.modified())
-                            .map(|modified| modified > baseline.last_backup)
-                            .unwrap_or(true) // If we can't check, process it
-                    } else {
-                        true // No baseline, process all files
-                    };
-                    
-                    if should_process {
-                        all_jsonl_files.push((jsonl_file, session_dir));
-                    } else {
-                        files_filtered += 1;
-                    }
-                } else {
-                    files_filtered += 1;
-                }
-            }
-        }
-
-        if !options.json_output {
-            if files_filtered > 0 {
-                println!(
-                    "📁 Found {} JSONL files (filtered out {} by date)",
-                    all_jsonl_files.len(),
-                    files_filtered
-                );
-            } else {
-                println!(
-                    "📁 Found {} JSONL files across all instances",
-                    all_jsonl_files.len()
-                );
-            }
-        }
-
-        // Sort files by timestamp - use file_parser for sorting
-        let sorted_files = self.file_parser.sort_files_by_timestamp(all_jsonl_files);
-
-        // Process files with dedup
-        let mut fresh_sessions = self.dedup_engine
-            .process_files_with_global_dedup(sorted_files, &options, &self.parser)
-            .await?;
-        
-        // Prepend baseline summary if we have one
-        if use_baseline && baseline.total_cost > 0.0 {
-            // Create a summary session from baseline
-            let baseline_session = SessionOutput {
-                session_id: "baseline".to_string(),
-                project_path: "All Historical Projects".to_string(),
-                input_tokens: (baseline.total_tokens / 2) as u32, // Approximate split
-                output_tokens: (baseline.total_tokens / 2) as u32,
-                cache_creation_tokens: 0,
-                cache_read_tokens: 0,
-                total_cost: baseline.total_cost,
-                last_activity: "Baseline (Cached)".to_string(),
-                models_used: vec!["various".to_string()],
-                daily_usage: HashMap::new(),
-            };
+            // Get backup directory from config
+            let _config = get_config();
+            // Use ~/.claude-backup/ as the default backup location (claude-keeper default)
+            let backup_dir = dirs::home_dir()
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join(".claude-backup");
             
-            // Prepend baseline to results
-            fresh_sessions.insert(0, baseline_session);
+            // Use ParquetSummaryReader to get detailed session data
+            let reader = ParquetSummaryReader::new(backup_dir)?;
+            let sessions = reader.read_detailed_sessions()?;
+
+            if !options.json_output {
+                println!(
+                    "📊 Processed {} sessions from backup data",
+                    sessions.len()
+                );
+            }
+
+            // Apply date filtering if needed
+            let mut filtered_sessions = sessions;
+            if options.since_date.is_some() || options.until_date.is_some() {
+                filtered_sessions = filtered_sessions.into_iter()
+                    .filter(|session| {
+                        // Parse session's last activity date
+                        use chrono::NaiveDate;
+                        
+                        if let Some(date_str) = session.last_activity.split('T').next() {
+                            if let Ok(session_date) = NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
+                                let session_datetime = session_date.and_hms_opt(0, 0, 0)
+                                    .map(|dt| chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(dt, chrono::Utc));
+                                
+                                if let Some(session_dt) = session_datetime {
+                                    // Check since date
+                                    if let Some(ref since) = options.since_date {
+                                        if session_dt < *since {
+                                            return false;
+                                        }
+                                    }
+                                    
+                                    // Check until date
+                                    if let Some(ref until) = options.until_date {
+                                        if session_dt > *until {
+                                            return false;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        true
+                    })
+                    .collect();
+            }
+
+            // Apply limit if specified
+            if let Some(limit) = options.limit {
+                filtered_sessions.truncate(limit);
+            }
+
+            Ok(filtered_sessions)
+        } else {
+            // For non-daily/monthly commands, return empty for now
+            // This path could be extended later if needed
+            Ok(Vec::new())
         }
-        
-        Ok(fresh_sessions)
     }
 
     pub async fn run_command(&mut self, command: &str, options: ProcessOptions) -> Result<()> {

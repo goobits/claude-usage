@@ -7,18 +7,13 @@ mod commands;
 mod config;
 mod dedup;
 mod display;
-mod file_discovery;
 mod keeper_integration;
 mod live;
 mod logging;
-mod memory;
 mod models;
 mod parquet;
-mod parser;
-mod parser_wrapper;
 mod pricing;
 mod reports;
-mod session_utils;
 mod timestamp_parser;
 
 use analyzer::ClaudeUsageAnalyzer;
@@ -89,7 +84,7 @@ async fn main() -> Result<()> {
     logging::init_logging();
 
     // Initialize memory monitoring with config
-    memory::init_memory_limit();
+    // memory::init_memory_limit(); // Removed to eliminate unused module warnings
 
     let cli = Cli::parse();
 

@@ -54,18 +54,22 @@
 //! run_display(baseline, rx).await?;
 //! ```
 
+#[cfg(feature = "live")]
 pub mod tui;
 pub mod state;
+#[cfg(feature = "live")]
 pub mod widgets;
 
+#[cfg(feature = "live")]
 pub use tui::*;
+#[cfg(feature = "live")]
 pub use state::*;
-pub use widgets::*;
 
 use crate::live::{BaselineSummary, LiveUpdate};
 use anyhow::Result;
-use std::time::{Duration, SystemTime};
 use tokio::sync::mpsc;
+#[cfg(feature = "live")]
+use std::time::{Duration, SystemTime};
 
 /// Main entry point for running the live display
 ///
@@ -81,6 +85,7 @@ use tokio::sync::mpsc;
 ///
 /// Returns `Ok(())` when the display exits normally, or an error if
 /// terminal setup or update processing fails.
+#[cfg(feature = "live")]
 pub async fn run_display(
     baseline: BaselineSummary,
     update_receiver: mpsc::Receiver<LiveUpdate>
@@ -89,6 +94,15 @@ pub async fn run_display(
     display_manager.run().await
 }
 
+#[cfg(not(feature = "live"))]
+pub async fn run_display(
+    _baseline: BaselineSummary,
+    _update_receiver: mpsc::Receiver<LiveUpdate>
+) -> Result<()> {
+    anyhow::bail!("Live display not available. Rebuild with --features live")
+}
+
+#[cfg(feature = "live")]
 /// Running totals maintained across all updates
 #[derive(Debug, Clone)]
 pub struct RunningTotals {
@@ -100,6 +114,7 @@ pub struct RunningTotals {
     pub total_sessions: u32,
 }
 
+#[cfg(feature = "live")]
 impl RunningTotals {
     /// Create new running totals from baseline
     pub fn from_baseline(baseline: &BaselineSummary) -> Self {
@@ -123,6 +138,7 @@ impl RunningTotals {
     }
 }
 
+#[cfg(feature = "live")]
 /// Recent activity entry for the activity log
 #[derive(Debug, Clone)]
 pub struct SessionActivity {
@@ -140,6 +156,7 @@ pub struct SessionActivity {
     pub session_id: String,
 }
 
+#[cfg(feature = "live")]
 impl SessionActivity {
     /// Create new session activity from a live update
     pub fn from_update(update: &LiveUpdate) -> Self {
@@ -181,3 +198,4 @@ impl SessionActivity {
         }
     }
 }
+

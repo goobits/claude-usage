@@ -5,5 +5,3 @@
 //! all detailed data into memory.
 
 pub mod reader;
-
-pub use reader::ParquetSummaryReader;

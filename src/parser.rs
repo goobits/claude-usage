@@ -90,6 +90,7 @@ use std::path::{Path, PathBuf};
 
 pub struct FileParser {
     file_discovery: FileDiscovery,
+    #[allow(dead_code)]
     keeper_integration: KeeperIntegration,
 }
 
@@ -228,10 +229,12 @@ impl FileParser {
         SessionUtils::create_unique_hash(entry)
     }
 
+    #[allow(dead_code)]
     pub fn find_session_blocks_files(&self, claude_paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
         self.file_discovery.find_session_blocks_files(claude_paths)
     }
 
+    #[allow(dead_code)]
     pub fn get_latest_session_blocks(&self, claude_paths: &[PathBuf]) -> Result<Vec<SessionBlock>> {
         let block_files = self.find_session_blocks_files(claude_paths)?;
 
@@ -242,6 +245,7 @@ impl FileParser {
         }
     }
 
+    #[allow(dead_code)]
     fn parse_session_blocks_file(&self, file_path: &Path) -> Result<Vec<SessionBlock>> {
         SessionUtils::parse_session_blocks_file(file_path, &self.keeper_integration)
     }

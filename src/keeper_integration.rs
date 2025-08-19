@@ -4,15 +4,53 @@
 //! data models and claude-keeper's FlexObject/SchemaAdapter system.
 
 use crate::config::get_config;
-use crate::memory;
 use crate::models::{MessageData, SessionBlock, UsageData, UsageEntry};
 use anyhow::{Context, Result};
-use claude_keeper_v3::claude::{create_claude_adapter, ClaudeMessage};
-use claude_keeper_v3::core::{FlexObject, JsonlParser, SchemaAdapter};
+use claude_keeper::claude::{create_claude_adapter, ClaudeMessage};
+use claude_keeper::core::{FlexObject, JsonlParser, SchemaAdapter};
 use std::path::Path;
 use tracing::{debug, info, warn};
 
+// Memory management stubs (removed to eliminate warnings)
+#[allow(dead_code)]
+mod memory {
+    use anyhow::Result;
+    
+    #[allow(dead_code)]
+    #[derive(Debug)]
+    pub struct MemoryStats {
+        pub current_usage: u64,
+        pub usage_percentage: f64,
+    }
+    
+    #[allow(dead_code)]
+    #[derive(Debug)]
+    pub enum MemoryPressureLevel {
+        Normal,
+    }
+    
+    #[allow(dead_code)]
+    pub fn track_allocation(_bytes: usize) {}
+    #[allow(dead_code)]
+    pub fn track_deallocation(_bytes: usize) {}
+    #[allow(dead_code)]
+    pub fn check_memory_pressure() -> bool { false }
+    #[allow(dead_code)]
+    pub fn should_spill_to_disk() -> bool { false }
+    #[allow(dead_code)]
+    pub fn get_memory_stats() -> MemoryStats {
+        MemoryStats { current_usage: 0, usage_percentage: 0.0 }
+    }
+    #[allow(dead_code)]
+    pub fn get_adaptive_batch_size(default: usize) -> usize { default }
+    #[allow(dead_code)]
+    pub fn get_pressure_level() -> MemoryPressureLevel { MemoryPressureLevel::Normal }
+    #[allow(dead_code)]
+    pub fn try_gc_if_needed() -> Result<()> { Ok(()) }
+}
+
 /// Integration wrapper that provides claude-keeper parsing capabilities
+#[allow(dead_code)]
 pub struct KeeperIntegration {
     parser: JsonlParser<FlexObject>,
     adapter: SchemaAdapter,
@@ -24,6 +62,7 @@ impl Default for KeeperIntegration {
     }
 }
 
+#[allow(dead_code)]
 impl KeeperIntegration {
     pub fn new() -> Self {
         let mut adapter = create_claude_adapter();

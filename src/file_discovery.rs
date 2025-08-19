@@ -34,7 +34,7 @@ impl FileDiscovery {
         let claude_home = &config.paths.claude_home;
         
         // Main Claude path
-        let main_path = claude_home.join(".claude");
+        let main_path = claude_home.clone();
         if main_path.join("projects").exists() {
             paths.push(main_path.clone());
         }
@@ -289,6 +289,7 @@ impl FileDiscovery {
     }
 
     /// Find session blocks files
+    #[allow(dead_code)]
     pub fn find_session_blocks_files(&self, claude_paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
         let mut block_files = Vec::new();
 

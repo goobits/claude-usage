@@ -18,6 +18,7 @@ pub struct AppTheme {
     pub secondary: Style,
     pub accent: Style,
     pub success: Style,
+    #[allow(dead_code)]
     pub warning: Style,
     pub error: Style,
     pub muted: Style,
