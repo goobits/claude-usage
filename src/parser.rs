@@ -86,8 +86,6 @@ use crate::session_utils::SessionUtils;
 use crate::timestamp_parser::TimestampParser;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use std::fs::File;
-use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 pub struct FileParser {
@@ -216,40 +214,6 @@ impl FileParser {
         file_tuples: Vec<(PathBuf, PathBuf)>,
     ) -> Vec<(PathBuf, PathBuf)> {
         self.file_discovery.sort_files_by_timestamp(file_tuples)
-    }
-
-    #[allow(dead_code)]
-    pub fn parse_jsonl_file(&self, file_path: &Path) -> Result<Vec<UsageEntry>> {
-        // Use the default collector processor
-        let processor = CollectorProcessor::new();
-        self.process_jsonl_file(file_path, processor)
-    }
-
-    // Generic method that accepts any processor
-    #[allow(dead_code)]
-    pub fn process_jsonl_file<P: JsonlProcessor>(
-        &self,
-        file_path: &Path,
-        mut processor: P,
-    ) -> Result<P::Output> {
-        let file = File::open(file_path)?;
-        let reader = BufReader::new(file);
-        let mut line_number = 0;
-
-        for line in reader.lines() {
-            line_number += 1;
-            let line = line?;
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-
-            if let Some(entry) = self.keeper_integration.parse_single_line(line) {
-                processor.process_entry(entry, line_number)?;
-            }
-        }
-
-        processor.finalize()
     }
 
     pub fn parse_timestamp(&self, timestamp_str: &str) -> Result<DateTime<Utc>> {

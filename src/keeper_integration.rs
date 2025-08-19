@@ -6,11 +6,9 @@
 use crate::config::get_config;
 use crate::memory;
 use crate::models::{MessageData, SessionBlock, UsageData, UsageEntry};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use claude_keeper_v3::claude::{create_claude_adapter, ClaudeMessage};
 use claude_keeper_v3::core::{FlexObject, JsonlParser, SchemaAdapter};
-use std::fs::File;
-use std::io::{BufRead, BufReader};
 use std::path::Path;
 use tracing::{debug, info, warn};
 
@@ -68,7 +66,7 @@ impl KeeperIntegration {
         }
     }
 
-    /// Parse JSONL file using claude-keeper's resilient parser with streaming
+    /// Parse JSONL file using claude-keeper subprocess streaming
     pub fn parse_jsonl_file(&self, file_path: &Path) -> Result<Vec<UsageEntry>> {
         // Get file size for progress tracking
         let metadata = std::fs::metadata(file_path)?;
@@ -84,7 +82,7 @@ impl KeeperIntegration {
                 file = %file_path.display(),
                 size_mb = file_size / 1_000_000,
                 memory_pressure = memory::check_memory_pressure(),
-                "Processing large file with streaming parser"
+                "Processing large file with claude-keeper subprocess"
             );
         }
 
@@ -97,12 +95,29 @@ impl KeeperIntegration {
             );
         }
 
-        // Open file with buffered reader for streaming
-        let file = File::open(file_path)?;
-        let base_buffer_size = get_config().memory.buffer_size_kb * 1024;
-        // Use adaptive sizing for buffer based on memory pressure
-        let adaptive_buffer_size = memory::get_adaptive_batch_size(base_buffer_size);
-        let reader = BufReader::with_capacity(adaptive_buffer_size, file);
+        debug!(
+            file = %file_path.display(),
+            "Calling claude-keeper stream for JSONL parsing"
+        );
+
+        // Call claude-keeper subprocess to stream the file
+        let output = std::process::Command::new("claude-keeper")
+            .args(&["stream", file_path.to_str().unwrap(), "--format", "json"])
+            .output()
+            .context("Failed to execute claude-keeper stream. Make sure claude-keeper is installed and accessible.")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            warn!(
+                file = %file_path.display(),
+                exit_code = ?output.status.code(),
+                stderr = %stderr,
+                "claude-keeper stream failed, falling back to empty result"
+            );
+            // Clean up file memory allocation tracking
+            memory::track_deallocation(file_size as usize);
+            return Ok(Vec::new());
+        }
 
         // Use adaptive batch size for entry processing
         let base_batch_size = 1000; // Default entries per batch
@@ -110,10 +125,9 @@ impl KeeperIntegration {
 
         debug!(
             file = %file_path.display(),
-            adaptive_buffer_size = adaptive_buffer_size,
             adaptive_batch_size = batch_size,
             memory_pressure = ?memory::get_pressure_level(),
-            "Using adaptive sizing for file processing"
+            "Processing claude-keeper stream output"
         );
 
         let mut entries = Vec::with_capacity(batch_size);
@@ -122,23 +136,10 @@ impl KeeperIntegration {
         let mut bytes_processed = 0u64;
         let mut last_progress_report = 0u64;
 
-        // Process file line by line with adaptive batching
-        for line_result in reader.lines() {
+        // Parse claude-keeper JSON output line by line
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
             line_number += 1;
-
-            let line = match line_result {
-                Ok(l) => l,
-                Err(e) => {
-                    warn!(
-                        line = line_number,
-                        error = %e,
-                        "Failed to read line from file"
-                    );
-                    parse_errors += 1;
-                    continue;
-                }
-            };
-
             bytes_processed += line.len() as u64 + 1; // +1 for newline
 
             // Track memory for line processing
@@ -152,24 +153,24 @@ impl KeeperIntegration {
 
             // Check memory pressure periodically
             if line_number % 1000 == 0 && memory::check_memory_pressure() {
+                debug!(
+                    line = line_number,
+                    memory_stats = ?memory::get_memory_stats(),
+                    "Memory pressure detected during processing"
+                );
+
+                // Try to trigger GC if needed
+                memory::try_gc_if_needed()?;
+
+                // If critical pressure, consider early exit or spilling
+                if memory::should_spill_to_disk() {
                     debug!(
                         line = line_number,
-                        memory_stats = ?memory::get_memory_stats(),
-                        "Memory pressure detected during processing"
+                        entries_collected = entries.len(),
+                        "Critical memory pressure - may need to implement spill-to-disk"
                     );
-
-                    // Try to trigger GC if needed
-                    memory::try_gc_if_needed()?;
-
-                    // If critical pressure, consider early exit or spilling
-                    if memory::should_spill_to_disk() {
-                        debug!(
-                            line = line_number,
-                            entries_collected = entries.len(),
-                            "Critical memory pressure - may need to implement spill-to-disk"
-                        );
-                    }
                 }
+            }
 
             // Report progress for large files with memory stats
             let progress_interval = get_config().processing.progress_interval_mb * 1_000_000;
@@ -187,50 +188,40 @@ impl KeeperIntegration {
                 last_progress_report = bytes_processed;
             }
 
-            // Parse line using claude-keeper
-            match self.parser.parse_string(&line, None) {
-                result if !result.objects.is_empty() => {
-                    // Successfully parsed line
-                    for flex_obj in result.objects {
-                        if let Some(entry) = self.convert_to_usage_entry(flex_obj) {
-                            entries.push(entry);
+            // Parse JSON line directly from claude-keeper output
+            match serde_json::from_str::<serde_json::Value>(line) {
+                Ok(json) => {
+                    // Convert JSON to FlexObject and then to UsageEntry
+                    let flex_obj: FlexObject = serde_json::from_value(json)?;
+                    if let Some(entry) = self.convert_to_usage_entry(flex_obj) {
+                        entries.push(entry);
 
-                            // Check if we need to process in batches to manage memory
-                            if entries.len() >= batch_size {
-                                debug!(
-                                    entries_in_batch = entries.len(),
-                                    memory_pressure = ?memory::get_pressure_level(),
-                                    "Reached adaptive batch size"
-                                );
-                                // In a more sophisticated implementation, we could
-                                // yield this batch and continue, but for now just log
-                            }
-                        } else {
+                        // Check if we need to process in batches to manage memory
+                        if entries.len() >= batch_size {
                             debug!(
-                                line_number = line_number,
-                                line_content = line.trim(),
-                                "claude-keeper parsed JSON but convert_to_usage_entry failed"
+                                entries_in_batch = entries.len(),
+                                memory_pressure = ?memory::get_pressure_level(),
+                                "Reached adaptive batch size"
                             );
+                            // In a more sophisticated implementation, we could
+                            // yield this batch and continue, but for now just log
                         }
+                    } else {
+                        debug!(
+                            line_number = line_number,
+                            line_content = line.trim(),
+                            "Failed to convert JSON to UsageEntry"
+                        );
                     }
                 }
-                result if !result.errors.is_empty() => {
-                    // Parse error on this line - log details for debugging
+                Err(e) => {
+                    // Parse error on this line
                     parse_errors += 1;
                     debug!(
                         line_number = line_number,
                         line_content = line.trim(),
-                        errors = ?result.errors,
-                        "Claude-keeper parse error details"
-                    );
-                }
-                _ => {
-                    // Empty result
-                    parse_errors += 1;
-                    debug!(
-                        line_number = line_number,
-                        line_content = line.trim(),
-                        "Claude-keeper returned empty result"
+                        error = %e,
+                        "JSON parse error from claude-keeper output"
                     );
                 }
             }
@@ -261,7 +252,7 @@ impl KeeperIntegration {
                 entries_extracted = entries.len(),
                 final_memory_mb = final_memory_stats.current_usage / 1_000_000,
                 memory_efficiency = format!("{:.1}%", 100.0 - final_memory_stats.usage_percentage),
-                "Successfully parsed JSONL file"
+                "Successfully parsed JSONL file via claude-keeper subprocess"
             );
         }
 

@@ -1,124 +1,67 @@
-// Demo script showing how to use the pluggable JSONL parser
+// Demo script showing how to use the JSONL parser with UnifiedParser
 // Run with: cargo run --example demo_parser
+// Note: This example demonstrates parsing usage data from JSONL files
 
 use anyhow::Result;
-use claude_usage::parser::{
-    CountProcessor, FileParser, FilterProcessor, JsonlProcessor, ProcessedEntry,
-    ProcessedEntryCollector, ValidEntryProcessor,
-};
-use std::path::Path;
+use claude_usage::parser::{FileParser, ProcessedEntry};
+use claude_usage::parser_wrapper::UnifiedParser;
 
 fn main() -> Result<()> {
     let parser = FileParser::new();
+    let unified_parser = UnifiedParser::new();
 
-    // Example 1: Count entries in a file
-    println!("=== Example 1: Counting entries ===");
-    if let Ok(paths) = parser.discover_claude_paths(false) {
-        if let Ok(files) = parser.find_jsonl_files(&paths) {
-            if let Some((file_path, _)) = files.first() {
-                let count = parser.process_jsonl_file(file_path, CountProcessor::new())?;
-                println!("Total entries in file: {}", count);
-            }
-        }
-    }
+    println!("=== Claude Usage JSONL Parser Demo ===");
 
-    // Example 2: Filter entries by model
-    println!("\n=== Example 2: Filter by model ===");
-    let demo_file = Path::new("test.jsonl");
-    if demo_file.exists() {
-        let filter =
-            FilterProcessor::new(|entry| entry.message.model.contains("claude-3-5-sonnet"));
-        let filtered_entries = parser.process_jsonl_file(demo_file, filter)?;
-        println!("Found {} Claude 3.5 Sonnet entries", filtered_entries.len());
-    }
-
-    // Example 3: Stream processing with parsed timestamps
-    println!("\n=== Example 3: Stream processing ===");
-    if demo_file.exists() {
-        let mut total_tokens = 0u64;
-        let mut entry_count = 0;
-
-        let processor = ValidEntryProcessor::new(|processed: ProcessedEntry| {
-            println!(
-                "Entry {} on {}: {} tokens from {}",
-                processed.line_number,
-                processed.date,
-                processed.total_tokens,
-                processed.entry.message.model
-            );
-            total_tokens += processed.total_tokens as u64;
-            entry_count += 1;
-            Ok(())
-        });
-
-        parser.process_jsonl_file(demo_file, processor)?;
-        println!(
-            "Processed {} entries with {} total tokens",
-            entry_count, total_tokens
-        );
-    }
-
-    // Example 4: Collect ProcessedEntry objects with all metadata
-    println!("\n=== Example 4: Processed entries with metadata ===");
-    if demo_file.exists() {
-        let processed_entries =
-            parser.process_jsonl_file(demo_file, ProcessedEntryCollector::new())?;
-
-        for entry in processed_entries.iter().take(5) {
-            println!(
-                "Line {}: {} @ {} - Input: {}, Output: {}, Cache: {}",
-                entry.line_number,
-                entry.entry.message.model,
-                entry.timestamp.format("%Y-%m-%d %H:%M:%S"),
-                entry.input_tokens(),
-                entry.output_tokens(),
-                entry.cache_tokens()
-            );
-        }
-    }
-
-    // Example 5: Custom processor for aggregating by date
-    println!("\n=== Example 5: Custom date aggregation ===");
-    if demo_file.exists() {
-        use std::collections::HashMap;
-
-        struct DateAggregator {
-            daily_tokens: HashMap<String, u32>,
-            parser: FileParser,
-        }
-
-        impl DateAggregator {
-            fn new() -> Self {
-                Self {
-                    daily_tokens: HashMap::new(),
-                    parser: FileParser::new(),
+    // Discover Claude instances
+    match parser.discover_claude_paths(false) {
+        Ok(paths) => {
+            println!("Found {} Claude instances", paths.len());
+            
+            // Find JSONL files
+            match parser.find_jsonl_files(&paths) {
+                Ok(files) => {
+                    println!("Found {} JSONL files total", files.len());
+                    
+                    // Process first few files as examples
+                    for (i, (file_path, session_dir)) in files.iter().take(3).enumerate() {
+                        println!("\n--- Example {}: {} ---", i + 1, file_path.display());
+                        
+                        // Parse the file
+                        match unified_parser.parse_jsonl_file(file_path) {
+                            Ok(entries) => {
+                                println!("Parsed {} entries", entries.len());
+                                
+                                // Show details for first few entries
+                                for (j, entry) in entries.iter().take(2).enumerate() {
+                                    println!("  Entry {}: model={}, request_id={}", 
+                                        j + 1, entry.message.model, entry.request_id);
+                                    
+                                    if let Some(usage) = &entry.message.usage {
+                                        println!("    Tokens: input={}, output={}", 
+                                            usage.input_tokens, usage.output_tokens);
+                                    }
+                                    
+                                    // Show processed metadata using FileParser utilities
+                                    if let Ok(processed) = ProcessedEntry::new(entry.clone(), &parser, j + 1) {
+                                        println!("    Date: {}, Total tokens: {}", 
+                                            processed.date, processed.total_tokens);
+                                    }
+                                }
+                                
+                                if entries.len() > 2 {
+                                    println!("    ... and {} more entries", entries.len() - 2);
+                                }
+                            }
+                            Err(e) => {
+                                println!("  Error parsing file: {}", e);
+                            }
+                        }
+                    }
                 }
+                Err(e) => println!("Error finding JSONL files: {}", e),
             }
         }
-
-        impl JsonlProcessor for DateAggregator {
-            type Output = HashMap<String, u32>;
-
-            fn process_entry(
-                &mut self,
-                entry: claude_usage::models::UsageEntry,
-                line_number: usize,
-            ) -> Result<()> {
-                if let Ok(processed) = ProcessedEntry::new(entry, &self.parser, line_number) {
-                    *self.daily_tokens.entry(processed.date).or_insert(0) += processed.total_tokens;
-                }
-                Ok(())
-            }
-
-            fn finalize(self) -> Result<Self::Output> {
-                Ok(self.daily_tokens)
-            }
-        }
-
-        let daily_totals = parser.process_jsonl_file(demo_file, DateAggregator::new())?;
-        for (date, tokens) in daily_totals {
-            println!("{}: {} tokens", date, tokens);
-        }
+        Err(e) => println!("Error discovering Claude paths: {}", e),
     }
 
     Ok(())

@@ -1,8 +1,6 @@
 use crate::keeper_integration::KeeperIntegration;
 use crate::models::*;
-use anyhow::Result;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
+use anyhow::{Context, Result};
 use std::path::Path;
 
 /// Handles session-related utilities including session ID extraction and session blocks parsing
@@ -38,20 +36,25 @@ impl SessionUtils {
     }
 
     /// Parse a session blocks file and return the session blocks
+    /// Uses claude-keeper subprocess to read and parse the file
     pub fn parse_session_blocks_file(
         file_path: &Path,
         keeper: &KeeperIntegration,
     ) -> Result<Vec<SessionBlock>> {
-        let file = File::open(file_path)?;
-        let reader = BufReader::new(file);
+        // Use claude-keeper subprocess to stream the file content
+        let output = std::process::Command::new("claude-keeper")
+            .args(&["stream", file_path.to_str().unwrap(), "--format", "json"])
+            .output()
+            .context("Failed to execute claude-keeper stream. Make sure claude-keeper is installed and accessible.")?;
 
-        // For JSON files, we need to accumulate lines
-        let mut content = String::new();
-        for line in reader.lines() {
-            content.push_str(&line?);
-            content.push('\n');
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            // Graceful fallback on failure
+            return Ok(Vec::new());
         }
 
+        // Parse the output content using keeper's session blocks parser
+        let content = String::from_utf8_lossy(&output.stdout);
         keeper.parse_session_blocks(&content)
     }
 }

@@ -3,48 +3,24 @@
 
 use anyhow::Result;
 use claude_usage::models::UsageEntry;
-use claude_usage::parser::{FileParser, JsonlProcessor, ProcessedEntry};
+use claude_usage::parser::{FileParser, ProcessedEntry};
+use claude_usage::parser_wrapper::UnifiedParser;
 use std::collections::HashMap;
 
-struct DateChecker {
-    target_date: String,
-    entries_found: Vec<ProcessedEntry>,
-    parser: FileParser,
-    file_count: usize,
-    total_files_checked: usize,
-}
-
-impl DateChecker {
-    fn new(target_date: &str) -> Self {
-        Self {
-            target_date: target_date.to_string(),
-            entries_found: Vec::new(),
-            parser: FileParser::new(),
-            file_count: 0,
-            total_files_checked: 0,
-        }
-    }
-}
-
-impl JsonlProcessor for DateChecker {
-    type Output = (Vec<ProcessedEntry>, usize, usize);
-
-    fn process_entry(&mut self, entry: UsageEntry, line_number: usize) -> Result<()> {
-        if let Ok(processed) = ProcessedEntry::new(entry, &self.parser, line_number) {
-            if processed.date == self.target_date {
-                self.entries_found.push(processed);
+fn find_entries_for_date(file_path: &std::path::Path, target_date: &str, parser: &FileParser) -> Result<Vec<ProcessedEntry>> {
+    let unified_parser = UnifiedParser::new();
+    let entries = unified_parser.parse_jsonl_file(file_path)?;
+    
+    let mut matching_entries = Vec::new();
+    for (line_number, entry) in entries.into_iter().enumerate() {
+        if let Ok(processed) = ProcessedEntry::new(entry, parser, line_number + 1) {
+            if processed.date == target_date {
+                matching_entries.push(processed);
             }
         }
-        Ok(())
     }
-
-    fn finalize(self) -> Result<Self::Output> {
-        Ok((
-            self.entries_found,
-            self.file_count,
-            self.total_files_checked,
-        ))
-    }
+    
+    Ok(matching_entries)
 }
 
 fn main() -> Result<()> {
@@ -70,11 +46,8 @@ fn main() -> Result<()> {
     for (file_path, session_dir) in &file_tuples {
         total_files_checked += 1;
 
-        // Use DateChecker to find entries for the target date
-        let mut checker = DateChecker::new(target_date);
-        checker.total_files_checked = total_files_checked;
-
-        let (entries, _, _) = parser.process_jsonl_file(file_path, checker)?;
+        // Find entries for the target date
+        let entries = find_entries_for_date(file_path, target_date, &parser)?;
 
         if !entries.is_empty() {
             files_with_entries += 1;
@@ -193,8 +166,7 @@ fn main() -> Result<()> {
         for check_date in nearby_dates {
             let mut count = 0;
             for (file_path, _) in &file_tuples {
-                let checker = DateChecker::new(check_date);
-                let (entries, _, _) = parser.process_jsonl_file(file_path, checker)?;
+                let entries = find_entries_for_date(file_path, check_date, &parser)?;
                 count += entries.len();
             }
             if count > 0 {

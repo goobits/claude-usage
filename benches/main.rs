@@ -1,4 +1,3 @@
-use claude_usage::parser::FileParser;
 use claude_usage::parser_wrapper::UnifiedParser;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::fs;
@@ -37,7 +36,7 @@ fn benchmark_jsonl_parsing(c: &mut Criterion) {
     let temp_dir = TempDir::new().unwrap();
     let jsonl_path = create_large_jsonl_file(temp_dir.path(), 1000).unwrap();
 
-    let parser = FileParser::new();
+    let parser = UnifiedParser::new();
 
     c.bench_function("parse_jsonl_1000_entries", |b| {
         b.iter(|| {
@@ -113,7 +112,7 @@ fn benchmark_legacy_parser_scaling(c: &mut Criterion) {
         let temp_file = create_performance_temp_file(&jsonl_content);
 
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, _| {
-            let parser = FileParser::new();
+            let parser = UnifiedParser::new();
             b.iter(|| parser.parse_jsonl_file(black_box(temp_file.path())));
         });
     }
@@ -144,12 +143,12 @@ fn benchmark_error_handling_performance(c: &mut Criterion) {
     let jsonl_with_errors = generate_performance_test_jsonl(1000, true);
     let temp_file = create_performance_temp_file(&jsonl_with_errors);
 
-    group.bench_function("legacy_with_errors", |b| {
-        let parser = FileParser::new();
+    group.bench_function("unified_with_errors", |b| {
+        let parser = UnifiedParser::new();
         b.iter(|| parser.parse_jsonl_file(black_box(temp_file.path())));
     });
 
-    group.bench_function("keeper_with_errors", |b| {
+    group.bench_function("keeper_integration_with_errors", |b| {
         let integration = KeeperIntegration::new();
         b.iter(|| integration.parse_jsonl_file(black_box(temp_file.path())));
     });
@@ -180,12 +179,12 @@ fn benchmark_memory_usage_performance(c: &mut Criterion) {
     let large_jsonl = generate_performance_test_jsonl(50000, false);
     let temp_file = create_performance_temp_file(&large_jsonl);
 
-    group.bench_function("legacy_large_file", |b| {
-        let parser = FileParser::new();
+    group.bench_function("unified_large_file", |b| {
+        let parser = UnifiedParser::new();
         b.iter(|| parser.parse_jsonl_file(black_box(temp_file.path())));
     });
 
-    group.bench_function("keeper_large_file", |b| {
+    group.bench_function("keeper_integration_large_file", |b| {
         let integration = KeeperIntegration::new();
         b.iter(|| integration.parse_jsonl_file(black_box(temp_file.path())));
     });
