@@ -4,9 +4,12 @@
 //! to extract summary information without loading full datasets into memory.
 
 use anyhow::{Context, Result};
+use chrono;
+use serde_json::Value;
 use std::fs;
 use std::path::PathBuf;
-use std::time::SystemTime;
+use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH, Duration};
 use tracing::{debug, info, warn};
 
 use crate::live::BaselineSummary;
@@ -47,10 +50,6 @@ impl ParquetSummaryReader {
             return Ok(BaselineSummary::default());
         }
 
-        // For now, we'll implement a basic stub that returns mock data
-        // In a full implementation, this would use a parquet library like arrow-rs
-        // to efficiently read and aggregate the data
-        
         let total_files = parquet_files.len();
         debug!(file_count = total_files, "Found parquet backup files");
 
@@ -62,12 +61,52 @@ impl ParquetSummaryReader {
             .max()
             .unwrap_or(SystemTime::UNIX_EPOCH);
 
-        // For now, return a basic summary based on file count
-        // In a real implementation, we would parse the parquet files to get actual usage data
+        // Initialize aggregation variables
+        let mut total_cost = 0.0;
+        let mut total_tokens = 0u64;
+        let mut sessions_today = 0u32;
+
+        // Get today's date for session counting
+        let today = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::from_secs(0))
+            .as_secs() / 86400; // Days since epoch
+
+        // Process each parquet file
+        for parquet_file in &parquet_files {
+            debug!(file = %parquet_file.display(), "Processing parquet file");
+            
+            match self.read_parquet_file_stats(parquet_file) {
+                Ok(stats) => {
+                    total_cost += stats.total_cost;
+                    total_tokens += stats.total_tokens;
+                    
+                    // Count sessions from today
+                    for session_time in stats.session_times {
+                        let session_day = session_time
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap_or(Duration::from_secs(0))
+                            .as_secs() / 86400;
+                        
+                        if session_day == today {
+                            sessions_today += 1;
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        file = %parquet_file.display(),
+                        error = %e,
+                        "Failed to read parquet file stats, skipping"
+                    );
+                }
+            }
+        }
+
         let summary = BaselineSummary {
-            total_cost: 0.0,  // Would be calculated from parquet data
-            total_tokens: 0,   // Would be calculated from parquet data
-            sessions_today: 0, // Would be calculated from parquet data
+            total_cost,
+            total_tokens,
+            sessions_today,
             last_backup,
         };
 
@@ -78,6 +117,72 @@ impl ParquetSummaryReader {
         );
 
         Ok(summary)
+    }
+
+    /// Read statistics from a single parquet file using claude-keeper
+    fn read_parquet_file_stats(&self, parquet_file: &PathBuf) -> Result<ParquetFileStats> {
+        debug!(
+            file = %parquet_file.display(),
+            "Calling claude-keeper read for parquet file"
+        );
+
+        let output = Command::new("claude-keeper")
+            .args(&[
+                "read",
+                parquet_file.to_str().unwrap_or(""),
+                "--format",
+                "json",
+                "--stats"
+            ])
+            .output()
+            .context("Failed to execute claude-keeper read command")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(anyhow::anyhow!(
+                "claude-keeper read failed with exit code {:?}: {}",
+                output.status.code(),
+                stderr
+            ));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let json: Value = serde_json::from_str(&stdout)
+            .context("Failed to parse claude-keeper JSON output")?;
+
+        // Extract data from JSON response
+        let total_cost = json.get("total_cost_usd")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+
+        let total_input_tokens = json.get("total_input_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+
+        let total_output_tokens = json.get("total_output_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+
+        let total_tokens = total_input_tokens + total_output_tokens;
+
+        // Extract session times for today counting
+        let mut session_times = Vec::new();
+        if let Some(sessions) = json.get("sessions").and_then(|v| v.as_array()) {
+            for session in sessions {
+                if let Some(timestamp_str) = session.get("timestamp").and_then(|v| v.as_str()) {
+                    // Try to parse ISO 8601 timestamp
+                    if let Ok(timestamp) = chrono::DateTime::parse_from_rfc3339(timestamp_str) {
+                        session_times.push(UNIX_EPOCH + Duration::from_secs(timestamp.timestamp() as u64));
+                    }
+                }
+            }
+        }
+
+        Ok(ParquetFileStats {
+            total_cost,
+            total_tokens,
+            session_times,
+        })
     }
 
     /// Find all parquet files in the backup directory
@@ -139,4 +244,11 @@ pub struct BackupStats {
     pub file_count: usize,
     pub total_size_bytes: u64,
     pub latest_modified: SystemTime,
+}
+
+/// Statistics extracted from a single parquet file
+struct ParquetFileStats {
+    total_cost: f64,
+    total_tokens: u64,
+    session_times: Vec<SystemTime>,
 }

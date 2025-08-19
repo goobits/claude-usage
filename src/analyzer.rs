@@ -75,6 +75,8 @@ use crate::models::*;
 use crate::parser::FileParser;
 use crate::parser_wrapper::UnifiedParser;
 use anyhow::Result;
+use std::collections::HashMap;
+use std::time::SystemTime;
 use tracing::warn;
 
 pub struct ClaudeUsageAnalyzer {
@@ -105,6 +107,30 @@ impl ClaudeUsageAnalyzer {
         _command: &str,
         options: ProcessOptions,
     ) -> Result<Vec<SessionOutput>> {
+        // Check and refresh baseline for daily/monthly commands
+        use crate::live::baseline::{should_refresh_baseline, refresh_baseline, load_baseline_summary};
+        
+        // Only use baseline for daily/monthly commands (not for session command)
+        let use_baseline = matches!(_command, "daily" | "monthly");
+        
+        let baseline = if use_baseline {
+            // Check if we need to refresh the backup
+            if should_refresh_baseline() {
+                // Run backup if needed (this is async)
+                if let Ok(baseline) = refresh_baseline().await {
+                    baseline
+                } else {
+                    // If backup fails, continue without baseline
+                    crate::live::BaselineSummary::default()
+                }
+            } else {
+                // Load existing baseline
+                load_baseline_summary().unwrap_or_default()
+            }
+        } else {
+            crate::live::BaselineSummary::default()
+        };
+
         // Discover Claude paths - use file_parser for discovery
         let paths = self
             .file_parser
@@ -132,7 +158,22 @@ impl ClaudeUsageAnalyzer {
                     options.since_date.as_ref(),
                     options.until_date.as_ref(),
                 ) {
-                    all_jsonl_files.push((jsonl_file, session_dir));
+                    // Also check if file is newer than baseline
+                    let should_process = if use_baseline && baseline.last_backup != SystemTime::UNIX_EPOCH {
+                        // Check if file was modified after the baseline backup
+                        jsonl_file.metadata()
+                            .and_then(|m| m.modified())
+                            .map(|modified| modified > baseline.last_backup)
+                            .unwrap_or(true) // If we can't check, process it
+                    } else {
+                        true // No baseline, process all files
+                    };
+                    
+                    if should_process {
+                        all_jsonl_files.push((jsonl_file, session_dir));
+                    } else {
+                        files_filtered += 1;
+                    }
                 } else {
                     files_filtered += 1;
                 }
@@ -157,10 +198,32 @@ impl ClaudeUsageAnalyzer {
         // Sort files by timestamp - use file_parser for sorting
         let sorted_files = self.file_parser.sort_files_by_timestamp(all_jsonl_files);
 
-        // Pass UnifiedParser to dedup engine
-        self.dedup_engine
+        // Process files with dedup
+        let mut fresh_sessions = self.dedup_engine
             .process_files_with_global_dedup(sorted_files, &options, &self.parser)
-            .await
+            .await?;
+        
+        // Prepend baseline summary if we have one
+        if use_baseline && baseline.total_cost > 0.0 {
+            // Create a summary session from baseline
+            let baseline_session = SessionOutput {
+                session_id: "baseline".to_string(),
+                project_path: "All Historical Projects".to_string(),
+                input_tokens: (baseline.total_tokens / 2) as u32, // Approximate split
+                output_tokens: (baseline.total_tokens / 2) as u32,
+                cache_creation_tokens: 0,
+                cache_read_tokens: 0,
+                total_cost: baseline.total_cost,
+                last_activity: "Baseline (Cached)".to_string(),
+                models_used: vec!["various".to_string()],
+                daily_usage: HashMap::new(),
+            };
+            
+            // Prepend baseline to results
+            fresh_sessions.insert(0, baseline_session);
+        }
+        
+        Ok(fresh_sessions)
     }
 
     pub async fn run_command(&mut self, command: &str, options: ProcessOptions) -> Result<()> {
