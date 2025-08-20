@@ -3,13 +3,12 @@
 //! This module provides the bridge between claude-usage's existing
 //! data models and claude-keeper's FlexObject/SchemaAdapter system.
 
-use crate::config::get_config;
 use crate::models::{MessageData, SessionBlock, UsageData, UsageEntry};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use claude_keeper::claude::{create_claude_adapter, ClaudeMessage};
 use claude_keeper::core::{FlexObject, JsonlParser, SchemaAdapter};
 use std::path::Path;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 // Memory management is now handled by claude-keeper's streaming parser
 // No need for custom memory tracking as claude-keeper handles files of any size efficiently

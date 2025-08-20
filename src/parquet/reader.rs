@@ -8,16 +8,14 @@ use chrono;
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH, Duration};
 use tracing::{debug, info, warn};
 
-use claude_keeper::query::engine::QueryEngine;
 
 use crate::live::BaselineSummary;
 
 /// Read a parquet file using claude-keeper library 
-fn read_parquet_with_library(parquet_file: &PathBuf) -> Result<String> {
+fn read_parquet_with_library(_parquet_file: &PathBuf) -> Result<String> {
     // Use claude-keeper library to read and convert parquet to JSONL
     #[cfg(feature = "keeper-integration")]
     {
@@ -176,64 +174,21 @@ impl ParquetSummaryReader {
     async fn read_parquet_file_stats_async(&self, parquet_file: &PathBuf) -> Result<ParquetFileStats> {
         debug!(
             file = %parquet_file.display(),
-            "Querying parquet file using QueryEngine"
+            "Querying parquet file using QueryEngine - TEMPORARILY DISABLED to avoid infinite loop"
         );
 
-        // Claude-keeper is always available as a dependency, so no feature check needed
-        {
-            debug!("Creating QueryEngine for file: {:?}", parquet_file);
-            let engine = match QueryEngine::new(parquet_file.clone()).await {
-                Ok(engine) => {
-                    debug!("QueryEngine created successfully");
-                    engine
-                }
-                Err(e) => {
-                    return Err(anyhow::anyhow!("Failed to create QueryEngine for file {:?}: {}", parquet_file, e));
-                }
-            };
-            
-            // Start with a simple query to test DataFusion connectivity  
-            let query = "SELECT COUNT(*) as message_count FROM conversations";
-            
-            debug!("Executing DataFusion SQL query: {}", query);
-            
-            let results = match engine.execute_sql(query).await {
-                Ok(results) => {
-                    debug!("SQL query executed successfully");
-                    results
-                }
-                Err(e) => {
-                    return Err(anyhow::anyhow!("SQL query failed for file {:?}: {}", parquet_file, e));
-                }
-            };
-            
-            // Debug what DataFusion actually returned
-            debug!("DataFusion query completed with {} results", results.len());
-            for (i, result_row) in results.iter().enumerate() {
-                debug!("Result row {}: {}", i, result_row.data());
-            }
-            
-            // Check if we got any results and try to extract values
-            if results.is_empty() {
-                warn!("DataFusion query returned no results for file: {:?}", parquet_file);
-            }
-            
-            // For now, use placeholder values until we can parse DataFusion results properly
-            let total_cost = 0.0;  // DataFusion results parsing needed
-            let total_input_tokens = 0;  // DataFusion results parsing needed  
-            let total_output_tokens = 0;  // DataFusion results parsing needed
-            let total_tokens = total_input_tokens + total_output_tokens;
-            
-            let session_times = Vec::new();  // DataFusion results parsing needed
-            
-            debug!("QueryEngine returned {} results", results.len());
-            
-            Ok(ParquetFileStats {
-                total_cost,
-                total_tokens,
-                session_times,
-            })
-        }
+        // TEMPORARY FIX: Skip QueryEngine to avoid infinite loop during testing
+        // TODO: Fix the QueryEngine infinite loop issue in claude-keeper integration
+        warn!(
+            file = %parquet_file.display(),
+            "QueryEngine temporarily disabled - using placeholder values"
+        );
+        
+        Ok(ParquetFileStats {
+            total_cost: 0.0,
+            total_tokens: 0,
+            session_times: Vec::new(),
+        })
     }
 
     /// Find all parquet files in the backup directory (recursively)

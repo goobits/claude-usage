@@ -3,11 +3,14 @@
 //! These tests verify the TUI components work correctly and handle
 //! various scenarios like resizing, scrolling, and data updates.
 
+#[cfg(feature = "live")]
 use claude_usage::display::{LiveDisplay, RunningTotals, SessionActivity};
+#[cfg(feature = "live")]
 use claude_usage::live::{BaselineSummary, LiveUpdate};
 use claude_usage::models::{MessageData, UsageData, UsageEntry, SessionData};
 use std::time::SystemTime;
 
+#[cfg(feature = "live")]
 fn create_test_baseline() -> BaselineSummary {
     BaselineSummary {
         total_cost: 10.5,
@@ -17,6 +20,7 @@ fn create_test_baseline() -> BaselineSummary {
     }
 }
 
+#[cfg(feature = "live")]
 fn create_test_update(session_id: &str, project: &str, tokens: u32, cost: f64) -> LiveUpdate {
     LiveUpdate {
         entry: UsageEntry {
@@ -45,6 +49,7 @@ fn create_test_update(session_id: &str, project: &str, tokens: u32, cost: f64) -
     }
 }
 
+#[cfg(feature = "live")]
 #[test]
 fn test_live_display_initialization() {
     let baseline = create_test_baseline();
@@ -58,6 +63,7 @@ fn test_live_display_initialization() {
     assert_eq!(display.scroll_position, 0);
 }
 
+#[cfg(feature = "live")]
 #[test]
 fn test_live_display_update() {
     let baseline = create_test_baseline();
@@ -87,6 +93,7 @@ fn test_live_display_update() {
     assert_eq!(activity.cost, 0.15);
 }
 
+#[cfg(feature = "live")]
 #[test]
 fn test_ring_buffer_overflow() {
     let baseline = create_test_baseline();
@@ -106,6 +113,7 @@ fn test_ring_buffer_overflow() {
     assert_eq!(display.recent_entries[99].session_id, "session_50");
 }
 
+#[cfg(feature = "live")]
 #[test]
 fn test_scroll_functionality() {
     let baseline = create_test_baseline();
@@ -137,6 +145,7 @@ fn test_scroll_functionality() {
     assert_eq!(display.scroll_position, 10); // 20 entries - 10 visible = 10 max scroll
 }
 
+#[cfg(feature = "live")]
 #[test]
 fn test_visible_activities() {
     let baseline = create_test_baseline();
@@ -165,6 +174,7 @@ fn test_visible_activities() {
     assert_eq!(visible[9].session_id, "session_0"); // Last entry is session_0
 }
 
+#[cfg(feature = "live")]
 #[test]
 fn test_format_totals() {
     let baseline = BaselineSummary {
@@ -182,6 +192,7 @@ fn test_format_totals() {
     assert!(formatted.contains("15"));
 }
 
+#[cfg(feature = "live")]
 #[test]
 fn test_format_current_session() {
     let baseline = create_test_baseline();
@@ -201,6 +212,7 @@ fn test_format_current_session() {
     assert!(formatted.contains("5K"));  // Output tokens (half of input)
 }
 
+#[cfg(feature = "live")]
 #[test]
 fn test_session_activity_creation() {
     let update = create_test_update("session1", "/path/to/project", 1500, 0.25);
@@ -212,6 +224,7 @@ fn test_session_activity_creation() {
     assert_eq!(activity.cost, 0.25);
 }
 
+#[cfg(feature = "live")]
 #[test]
 fn test_can_scroll() {
     let baseline = create_test_baseline();
@@ -235,6 +248,7 @@ fn test_can_scroll() {
     assert!(display.can_scroll(10)); // 15 entries, 10 visible lines
 }
 
+#[cfg(feature = "live")]
 #[test]
 fn test_running_totals_from_baseline() {
     let baseline = BaselineSummary {
@@ -250,6 +264,7 @@ fn test_running_totals_from_baseline() {
     assert_eq!(totals.total_sessions, 42);
 }
 
+#[cfg(feature = "live")]
 #[test]
 fn test_running_totals_update() {
     let baseline = create_test_baseline();

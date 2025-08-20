@@ -66,10 +66,15 @@ pub mod analyzer;
 pub mod config;
 pub mod dedup;
 pub mod display;
+pub mod file_discovery;
 pub mod logging;
+pub mod memory;
 pub mod models;
+pub mod parser;
+pub mod parser_wrapper;
 pub mod pricing;
 pub mod reports;
+pub mod session_utils;
 pub mod timestamp_parser;
 
 // Live mode modules

@@ -190,10 +190,11 @@ impl LiveDisplay {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "live"))]
 mod tests {
     use super::*;
     use crate::models::{MessageData, UsageData, UsageEntry};
+    use std::time::SystemTime;
 
     fn create_test_update(session_id: &str, project: &str, tokens: u32, cost: f64) -> LiveUpdate {
         LiveUpdate {

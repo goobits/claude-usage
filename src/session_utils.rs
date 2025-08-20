@@ -1,6 +1,6 @@
 use crate::keeper_integration::KeeperIntegration;
 use crate::models::*;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::path::Path;
 
 /// Handles session-related utilities including session ID extraction and session blocks parsing
