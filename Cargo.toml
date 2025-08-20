@@ -56,7 +56,7 @@ tracing-appender = "0.2"
 uuid = { version = "1.6", features = ["v4", "fast-rng"] }
 
 # Integration with claude-keeper for schema-resilient parsing
-claude-keeper = { path = "../claude-keeper", features = ["query"] }
+claude-keeper = { path = "../claude-keeper", features = ["cli", "storage", "query"] }
 
 [dev-dependencies]
 assert_cmd = "2.0"

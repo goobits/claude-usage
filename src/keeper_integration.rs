@@ -11,43 +11,8 @@ use claude_keeper::core::{FlexObject, JsonlParser, SchemaAdapter};
 use std::path::Path;
 use tracing::{debug, info, warn};
 
-// Memory management stubs (removed to eliminate warnings)
-#[allow(dead_code)]
-mod memory {
-    use anyhow::Result;
-    
-    #[allow(dead_code)]
-    #[derive(Debug)]
-    pub struct MemoryStats {
-        pub current_usage: u64,
-        pub usage_percentage: f64,
-    }
-    
-    #[allow(dead_code)]
-    #[derive(Debug)]
-    pub enum MemoryPressureLevel {
-        Normal,
-    }
-    
-    #[allow(dead_code)]
-    pub fn track_allocation(_bytes: usize) {}
-    #[allow(dead_code)]
-    pub fn track_deallocation(_bytes: usize) {}
-    #[allow(dead_code)]
-    pub fn check_memory_pressure() -> bool { false }
-    #[allow(dead_code)]
-    pub fn should_spill_to_disk() -> bool { false }
-    #[allow(dead_code)]
-    pub fn get_memory_stats() -> MemoryStats {
-        MemoryStats { current_usage: 0, usage_percentage: 0.0 }
-    }
-    #[allow(dead_code)]
-    pub fn get_adaptive_batch_size(default: usize) -> usize { default }
-    #[allow(dead_code)]
-    pub fn get_pressure_level() -> MemoryPressureLevel { MemoryPressureLevel::Normal }
-    #[allow(dead_code)]
-    pub fn try_gc_if_needed() -> Result<()> { Ok(()) }
-}
+// Memory management is now handled by claude-keeper's streaming parser
+// No need for custom memory tracking as claude-keeper handles files of any size efficiently
 
 /// Integration wrapper that provides claude-keeper parsing capabilities
 #[allow(dead_code)]
@@ -105,193 +70,49 @@ impl KeeperIntegration {
         }
     }
 
-    /// Parse JSONL file using claude-keeper subprocess streaming
+    /// Parse JSONL file using claude-keeper streaming parser
     pub fn parse_jsonl_file(&self, file_path: &Path) -> Result<Vec<UsageEntry>> {
-        // Get file size for progress tracking
-        let metadata = std::fs::metadata(file_path)?;
-        let file_size = metadata.len();
-
-        // Track memory allocation for file processing
-        memory::track_allocation(file_size as usize);
-
-        // Warn if file is large
-        if file_size > 100_000_000 {
-            // 100MB
-            warn!(
-                file = %file_path.display(),
-                size_mb = file_size / 1_000_000,
-                memory_pressure = memory::check_memory_pressure(),
-                "Processing large file with claude-keeper subprocess"
-            );
-        }
-
-        // Check if we should spill to disk due to memory pressure
-        if memory::should_spill_to_disk() {
-            warn!(
-                file = %file_path.display(),
-                memory_stats = ?memory::get_memory_stats(),
-                "Critical memory pressure detected - consider processing in smaller chunks"
-            );
-        }
-
         debug!(
             file = %file_path.display(),
-            "Calling claude-keeper stream for JSONL parsing"
+            "Parsing JSONL file with claude-keeper streaming parser"
         );
 
-        // Call claude-keeper subprocess to stream the file
-        let output = std::process::Command::new("claude-keeper")
-            .args(&["stream", file_path.to_str().unwrap(), "--format", "json"])
-            .output()
-            .context("Failed to execute claude-keeper stream. Make sure claude-keeper is installed and accessible.")?;
+        // Use claude-keeper's streaming parser - this handles memory efficiently
+        let parse_result = self.parser.parse_file(file_path)?;
+        
+        let mut entries = Vec::new();
+        let mut conversion_errors = 0;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            warn!(
-                file = %file_path.display(),
-                exit_code = ?output.status.code(),
-                stderr = %stderr,
-                "claude-keeper stream failed, falling back to empty result"
-            );
-            // Clean up file memory allocation tracking
-            memory::track_deallocation(file_size as usize);
-            return Ok(Vec::new());
+        // Extract values we need before consuming parse_result
+        let total_lines = parse_result.total_lines;
+        let parse_errors_count = parse_result.errors.len();
+        let success_rate = parse_result.success_rate();
+
+        // Convert FlexObjects to UsageEntries
+        for flex_obj in parse_result.objects {
+            if let Some(entry) = self.convert_to_usage_entry(flex_obj) {
+                entries.push(entry);
+            } else {
+                conversion_errors += 1;
+            }
         }
 
-        // Use adaptive batch size for entry processing
-        let base_batch_size = 1000; // Default entries per batch
-        let batch_size = memory::get_adaptive_batch_size(base_batch_size);
-
-        debug!(
-            file = %file_path.display(),
-            adaptive_batch_size = batch_size,
-            memory_pressure = ?memory::get_pressure_level(),
-            "Processing claude-keeper stream output"
-        );
-
-        let mut entries = Vec::with_capacity(batch_size);
-        let mut line_number = 0;
-        let mut parse_errors = 0;
-        let mut bytes_processed = 0u64;
-        let mut last_progress_report = 0u64;
-
-        // Parse claude-keeper JSON output line by line
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        for line in stdout.lines() {
-            line_number += 1;
-            bytes_processed += line.len() as u64 + 1; // +1 for newline
-
-            // Track memory for line processing
-            memory::track_allocation(line.len());
-
-            // Skip empty lines
-            if line.trim().is_empty() {
-                memory::track_deallocation(line.len());
-                continue;
-            }
-
-            // Check memory pressure periodically
-            if line_number % 1000 == 0 && memory::check_memory_pressure() {
-                debug!(
-                    line = line_number,
-                    memory_stats = ?memory::get_memory_stats(),
-                    "Memory pressure detected during processing"
-                );
-
-                // Try to trigger GC if needed
-                memory::try_gc_if_needed()?;
-
-                // If critical pressure, consider early exit or spilling
-                if memory::should_spill_to_disk() {
-                    debug!(
-                        line = line_number,
-                        entries_collected = entries.len(),
-                        "Critical memory pressure - may need to implement spill-to-disk"
-                    );
-                }
-            }
-
-            // Report progress for large files with memory stats
-            let progress_interval = get_config().processing.progress_interval_mb * 1_000_000;
-            if file_size > progress_interval as u64
-                && bytes_processed - last_progress_report > progress_interval as u64
-            {
-                let memory_stats = memory::get_memory_stats();
-                debug!(
-                    progress_pct = (bytes_processed as f64 / file_size as f64 * 100.0) as u32,
-                    mb_processed = bytes_processed / 1_000_000,
-                    memory_usage_mb = memory_stats.current_usage / 1_000_000,
-                    memory_pressure = ?memory::get_pressure_level(),
-                    "Processing large file"
-                );
-                last_progress_report = bytes_processed;
-            }
-
-            // Parse JSON line directly from claude-keeper output
-            match serde_json::from_str::<serde_json::Value>(line) {
-                Ok(json) => {
-                    // Convert JSON to FlexObject and then to UsageEntry
-                    let flex_obj: FlexObject = serde_json::from_value(json)?;
-                    if let Some(entry) = self.convert_to_usage_entry(flex_obj) {
-                        entries.push(entry);
-
-                        // Check if we need to process in batches to manage memory
-                        if entries.len() >= batch_size {
-                            debug!(
-                                entries_in_batch = entries.len(),
-                                memory_pressure = ?memory::get_pressure_level(),
-                                "Reached adaptive batch size"
-                            );
-                            // In a more sophisticated implementation, we could
-                            // yield this batch and continue, but for now just log
-                        }
-                    } else {
-                        debug!(
-                            line_number = line_number,
-                            line_content = line.trim(),
-                            "Failed to convert JSON to UsageEntry"
-                        );
-                    }
-                }
-                Err(e) => {
-                    // Parse error on this line
-                    parse_errors += 1;
-                    debug!(
-                        line_number = line_number,
-                        line_content = line.trim(),
-                        error = %e,
-                        "JSON parse error from claude-keeper output"
-                    );
-                }
-            }
-
-            // Clean up line memory tracking
-            memory::track_deallocation(line.len());
-        }
-
-        // Clean up file memory allocation tracking
-        memory::track_deallocation(file_size as usize);
-
-        // Log final statistics with memory info
-        let final_memory_stats = memory::get_memory_stats();
-        if parse_errors > 0 {
+        // Log results
+        if parse_errors_count > 0 || conversion_errors > 0 {
             info!(
                 file = %file_path.display(),
-                total_lines = line_number,
-                parse_errors = parse_errors,
+                total_lines = total_lines,
+                parse_errors = parse_errors_count,
+                conversion_errors = conversion_errors,
                 entries_extracted = entries.len(),
-                success_rate = format!("{:.1}%", ((line_number - parse_errors) as f64 / line_number as f64) * 100.0),
-                final_memory_mb = final_memory_stats.current_usage / 1_000_000,
-                "Completed parsing with errors"
+                success_rate = format!("{:.1}%", success_rate),
+                "Completed parsing with some errors"
             );
         } else {
             debug!(
                 file = %file_path.display(),
-                total_lines = line_number,
                 entries_extracted = entries.len(),
-                final_memory_mb = final_memory_stats.current_usage / 1_000_000,
-                memory_efficiency = format!("{:.1}%", 100.0 - final_memory_stats.usage_percentage),
-                "Successfully parsed JSONL file via claude-keeper subprocess"
+                "Successfully parsed JSONL file with claude-keeper streaming"
             );
         }
 

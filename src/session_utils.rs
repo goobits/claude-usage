@@ -42,21 +42,19 @@ impl SessionUtils {
         file_path: &Path,
         keeper: &KeeperIntegration,
     ) -> Result<Vec<SessionBlock>> {
-        // Use claude-keeper subprocess to stream the file content
-        let output = std::process::Command::new("claude-keeper")
-            .args(&["stream", file_path.to_str().unwrap(), "--format", "json"])
-            .output()
-            .context("Failed to execute claude-keeper stream. Make sure claude-keeper is installed and accessible.")?;
-
-        if !output.status.success() {
-            let _stderr = String::from_utf8_lossy(&output.stderr);
-            // Graceful fallback on failure
-            return Ok(Vec::new());
+        // Read the file directly instead of using subprocess
+        use std::fs;
+        
+        match fs::read_to_string(file_path) {
+            Ok(content) => {
+                // Parse the content using keeper's session blocks parser
+                keeper.parse_session_blocks(&content)
+            }
+            Err(_) => {
+                // Graceful fallback on failure
+                Ok(Vec::new())
+            }
         }
-
-        // Parse the output content using keeper's session blocks parser
-        let content = String::from_utf8_lossy(&output.stdout);
-        keeper.parse_session_blocks(&content)
     }
 }
 

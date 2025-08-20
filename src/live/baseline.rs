@@ -47,44 +47,35 @@ pub fn load_baseline_summary() -> Result<BaselineSummary> {
     Ok(summary)
 }
 
-/// Trigger a backup via claude-keeper and reload baseline
-#[allow(dead_code)]
+/// Trigger a backup via claude-keeper subprocess and reload baseline
 pub async fn refresh_baseline() -> Result<BaselineSummary> {
     info!("Refreshing baseline data via claude-keeper backup");
     
-    // Trigger claude-keeper backup
+    // Get standard Claude paths
+    let claude_dir = dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join(".claude");
+    
+    let backup_dir = dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join(".claude-backup");
+    
+    // Execute claude-keeper backup command
+    info!("Running claude-keeper backup from {} to {}", claude_dir.display(), backup_dir.display());
+    
     let output = tokio::process::Command::new("claude-keeper")
-        .args(&["backup", "--quiet"])
+        .args(&["backup", claude_dir.to_str().unwrap(), "--out", backup_dir.to_str().unwrap(), "--quiet"])
         .output()
         .await
-        .context("Failed to execute claude-keeper backup. Make sure claude-keeper is installed and accessible.")?;
-
+        .context("Failed to execute claude-keeper backup")?;
+    
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        warn!(
-            exit_code = output.status.code(),
-            stderr = %stderr,
-            "Claude-keeper backup command failed"
-        );
-        
-        // Provide user-friendly error context
-        if stderr.contains("command not found") || stderr.contains("not found") {
-            return Err(anyhow::anyhow!(
-                "claude-keeper not found. Please install claude-keeper first:\n\
-                 Visit https://github.com/mufeedvh/claude-keeper for installation instructions"
-            ));
-        } else if stderr.contains("permission") {
-            return Err(anyhow::anyhow!(
-                "Permission denied running claude-keeper.\n\
-                 Make sure claude-keeper is executable and you have proper permissions"
-            ));
-        }
-        
-        // Continue with existing baseline rather than failing
-        println!("⚠️  Backup command failed, trying to load existing data...");
-        return load_baseline_summary();
+        warn!("claude-keeper backup failed: {}", stderr);
+        return Err(anyhow::anyhow!("Backup failed: {}", stderr));
     }
-
+    
+    info!("Successfully completed claude-keeper backup");
     println!("✅ Auto-backup completed successfully");
     
     // Reload the baseline data
@@ -143,4 +134,58 @@ pub fn should_refresh_baseline() -> bool {
     
     debug!("No recent parquet files found, baseline refresh needed");
     true
+}
+
+/// Get enhanced analytics using claude-keeper's SQL query engine
+pub async fn get_sql_analytics() -> Result<serde_json::Value> {
+    info!("Running SQL analytics using claude-keeper query engine");
+    
+    let backup_dir = dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join(".claude-backup");
+    
+    if !backup_dir.exists() {
+        warn!("No backup directory found for SQL analytics");
+        return Ok(serde_json::json!({
+            "error": "No backup data available",
+            "suggestion": "Run claude-keeper backup first"
+        }));
+    }
+    
+    // Run SQL queries using claude-keeper
+    let queries = vec![
+        ("message_type_distribution", 
+         "SELECT message_type, COUNT(*) as count FROM conversations GROUP BY message_type"),
+        ("daily_activity_last_7_days", 
+         "SELECT DATE_TRUNC('day', timestamp) as date, COUNT(*) as messages FROM conversations WHERE timestamp > NOW() - INTERVAL '7 days' GROUP BY DATE_TRUNC('day', timestamp) ORDER BY date DESC"),
+        ("programming_languages",
+         "SELECT COUNT(CASE WHEN tool_usage LIKE '%rust%' THEN 1 END) as rust_mentions, COUNT(CASE WHEN tool_usage LIKE '%python%' THEN 1 END) as python_mentions, COUNT(CASE WHEN tool_usage LIKE '%sql%' THEN 1 END) as sql_mentions FROM conversations"),
+        ("top_sessions",
+         "SELECT session_id, COUNT(*) as messages, MIN(timestamp) as start_time, MAX(timestamp) as end_time FROM conversations GROUP BY session_id ORDER BY messages DESC LIMIT 5")
+    ];
+    
+    let mut results = serde_json::Map::new();
+    
+    for (query_name, sql) in queries {
+        debug!("Running SQL query: {}", query_name);
+        
+        let output = tokio::process::Command::new("claude-keeper")
+            .args(&["query", sql])
+            .current_dir(&backup_dir)
+            .output()
+            .await
+            .context(format!("Failed to execute SQL query: {}", query_name))?;
+        
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            // Parse the table output or JSON (claude-keeper returns table format by default)
+            results.insert(query_name.to_string(), serde_json::Value::String(stdout.to_string()));
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            warn!("SQL query {} failed: {}", query_name, stderr);
+            results.insert(query_name.to_string(), serde_json::Value::String(format!("Error: {}", stderr)));
+        }
+    }
+    
+    Ok(serde_json::Value::Object(results))
 }
