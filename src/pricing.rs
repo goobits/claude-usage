@@ -260,25 +260,35 @@ pub fn calculate_cost_simple(
     cache_creation_tokens: u32,
     cache_read_tokens: u32,
 ) -> f64 {
-    // Use hardcoded pricing based on model name
-    let (input_cost_per_token, output_cost_per_token) = if model.contains("opus") {
-        (1.5e-05, 7.5e-05) // $15/$75 per 1M tokens
-    } else if model.contains("sonnet") {
-        (3e-06, 1.5e-05) // $3/$15 per 1M tokens  
-    } else if model.contains("haiku") {
-        (2.5e-07, 1.25e-06) // $0.25/$1.25 per 1M tokens
-    } else {
-        // Default to sonnet pricing
-        (3e-06, 1.5e-05)
-    };
+    // Use hardcoded pricing based on model name - updated to match LiteLLM pricing
+    let (input_cost_per_token, output_cost_per_token, cache_creation_cost, cache_read_cost) = 
+        if model.contains("opus-4") || model.contains("claude-opus-4") {
+            // Claude 4 Opus pricing from LiteLLM
+            (0.000015, 0.000075, 0.00001875, 0.0000015) // $15/$75/$18.75/$1.50 per 1M tokens
+        } else if model.contains("sonnet-4") || model.contains("claude-sonnet-4") {
+            // Claude 4 Sonnet pricing (similar to Opus)
+            (0.000003, 0.000015, 0.00000375, 0.0000003) // $3/$15/$3.75/$0.30 per 1M tokens
+        } else if model.contains("opus") {
+            // Claude 3 Opus
+            (0.000015, 0.000075, 0.00001875, 0.0000015)
+        } else if model.contains("sonnet") {
+            // Claude 3.5 Sonnet
+            (0.000003, 0.000015, 0.00000375, 0.0000003)
+        } else if model.contains("haiku") {
+            // Claude 3 Haiku
+            (0.00000025, 0.00000125, 0.0000003125, 0.000000025)
+        } else {
+            // Default to Sonnet pricing
+            (0.000003, 0.000015, 0.00000375, 0.0000003)
+        };
     
     let mut cost = 0.0;
     cost += input_tokens as f64 * input_cost_per_token;
     cost += output_tokens as f64 * output_cost_per_token;
     
-    // Cache tokens use input pricing
-    cost += cache_creation_tokens as f64 * input_cost_per_token;
-    cost += cache_read_tokens as f64 * input_cost_per_token * 0.1; // Cache read is 10% of input cost
+    // Cache tokens use specific cache pricing
+    cost += cache_creation_tokens as f64 * cache_creation_cost;
+    cost += cache_read_tokens as f64 * cache_read_cost;
     
     cost
 }

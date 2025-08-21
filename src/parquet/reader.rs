@@ -15,23 +15,59 @@ use tracing::{debug, info, warn};
 use crate::live::BaselineSummary;
 
 /// Read a parquet file using claude-keeper library 
-fn read_parquet_with_library(_parquet_file: &PathBuf) -> Result<String> {
+fn read_parquet_with_library(parquet_file: &PathBuf) -> Result<String> {
+    debug!("Attempting to read parquet file: {}", parquet_file.display());
+    
     // Use claude-keeper library to read and convert parquet to JSONL
-    #[cfg(feature = "keeper-integration")]
-    {
-        use claude_keeper::parquet_reader::{ConversationParquetReader, QueryFilter};
-        match ConversationParquetReader::new(parquet_file) {
+    // Note: The cfg check is not needed since claude-keeper is a direct dependency
+    use claude_keeper::parquet_reader::{ConversationParquetReader, QueryFilter};
+    match ConversationParquetReader::new(parquet_file) {
             Ok(reader) => {
                 let filter = QueryFilter::new(); // No filters - get all data
                 match reader.query(&filter) {
                     Ok(results) => {
+                        debug!("Query returned {} objects", results.objects.len());
                         // Convert FlexObjects to JSONL format
                         let mut jsonl_lines = Vec::new();
-                        for flex_obj in results.objects {
-                            if let Ok(json_str) = serde_json::to_string(&flex_obj.to_json()) {
+                        for (i, flex_obj) in results.objects.iter().enumerate() {
+                            let json_val = flex_obj.to_json();
+                            
+                            // Debug: print first object structure
+                            if i == 0 {
+                                debug!("First FlexObject as JSON (truncated): {}", 
+                                    serde_json::to_string(&json_val)
+                                        .unwrap_or_default()
+                                        .chars()
+                                        .take(500)
+                                        .collect::<String>());
+                                if let serde_json::Value::Object(ref map) = json_val {
+                                    debug!("Top-level fields: {:?}", map.keys().collect::<Vec<_>>());
+                                    
+                                    // Check if there's a metadata or message field
+                                    if let Some(metadata) = map.get("metadata") {
+                                        debug!("Found metadata field: {}", 
+                                            serde_json::to_string(metadata)
+                                                .unwrap_or_default()
+                                                .chars()
+                                                .take(200)
+                                                .collect::<String>());
+                                    }
+                                    if let Some(message) = map.get("message") {
+                                        debug!("Found message field: {}", 
+                                            serde_json::to_string(message)
+                                                .unwrap_or_default()
+                                                .chars()
+                                                .take(200)
+                                                .collect::<String>());
+                                    }
+                                }
+                            }
+                            
+                            if let Ok(json_str) = serde_json::to_string(&json_val) {
                                 jsonl_lines.push(json_str);
                             }
                         }
+                        debug!("Converted {} objects to JSONL", jsonl_lines.len());
                         Ok(jsonl_lines.join("\n"))
                     }
                     Err(e) => {
@@ -53,13 +89,6 @@ fn read_parquet_with_library(_parquet_file: &PathBuf) -> Result<String> {
                 Ok(String::new()) // Return empty instead of failing
             }
         }
-    }
-    
-    #[cfg(not(feature = "keeper-integration"))]
-    {
-        // Fallback - return empty data
-        Ok(String::new())
-    }
 }
 
 /// Reads summary information from parquet backup files
@@ -255,7 +284,7 @@ impl ParquetSummaryReader {
     pub fn read_detailed_sessions(&self) -> Result<Vec<crate::models::SessionOutput>> {
         use crate::models::{SessionData, SessionOutput, DailyUsage};
         use crate::timestamp_parser::TimestampParser;
-        use std::collections::HashMap;
+        use std::collections::{HashMap, HashSet};
         
         info!(
             backup_dir = %self.backup_dir.display(),
@@ -274,6 +303,15 @@ impl ParquetSummaryReader {
 
         // Map to aggregate sessions across all files
         let mut sessions_map: HashMap<String, SessionData> = HashMap::new();
+        
+        // Set for deduplication using messageId:requestId (like ccusage)
+        let mut seen_messages: HashSet<String> = HashSet::new();
+        
+        // Debug counters
+        let mut total_messages_seen = 0;
+        let mut deduplicated_count = 0;
+        let mut no_dedup_key_count = 0;
+        let mut messages_with_usage = 0;
 
         // Process each parquet file
         for parquet_file in &parquet_files {
@@ -281,7 +319,10 @@ impl ParquetSummaryReader {
             
             // Use claude-keeper library directly to read parquet data
             let parquet_data = match read_parquet_with_library(parquet_file) {
-                Ok(data) => data,
+                Ok(data) => {
+                    debug!(file = %parquet_file.display(), "Successfully read parquet data, length: {}", data.len());
+                    data
+                },
                 Err(e) => {
                     warn!(
                         file = %parquet_file.display(),
@@ -291,6 +332,11 @@ impl ParquetSummaryReader {
                     continue;
                 }
             };
+            
+            if parquet_data.is_empty() {
+                debug!(file = %parquet_file.display(), "Parquet file returned empty data, skipping");
+                continue;
+            }
             
             let stdout = parquet_data;
             
@@ -330,6 +376,30 @@ impl ParquetSummaryReader {
 
             // Process each message
             for msg in messages {
+                total_messages_seen += 1;
+                
+                // Extract message ID and request ID for deduplication
+                let message_id = msg.get("message")
+                    .and_then(|m| m.get("id"))
+                    .or_else(|| msg.get("messageId"))
+                    .and_then(|v| v.as_str());
+                
+                let request_id = msg.get("requestId")
+                    .and_then(|v| v.as_str());
+                
+                // Create deduplication key like ccusage: messageId:requestId
+                if let (Some(mid), Some(rid)) = (message_id, request_id) {
+                    let dedup_key = format!("{}:{}", mid, rid);
+                    if seen_messages.contains(&dedup_key) {
+                        // Skip duplicate message
+                        deduplicated_count += 1;
+                        continue;
+                    }
+                    seen_messages.insert(dedup_key);
+                } else {
+                    no_dedup_key_count += 1;
+                }
+                
                 // Extract key fields
                 let session_id = msg.get("session_id")
                     .or_else(|| msg.get("sessionId"))
@@ -347,16 +417,15 @@ impl ParquetSummaryReader {
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
 
-                // Parse usage data from metadata field
-                let metadata = msg.get("metadata")
-                    .and_then(|v| v.as_str())
-                    .and_then(|s| serde_json::from_str::<Value>(s).ok())
-                    .unwrap_or(Value::Object(serde_json::Map::new()));
-
-                let usage = metadata.get("usage")
-                    .or_else(|| metadata.get("message").and_then(|m| m.get("usage")))
-                    .or_else(|| msg.get("usage"))
-                    .or_else(|| msg.get("message").and_then(|m| m.get("usage")));
+                // Get usage data - check message field first (where it actually is)
+                let usage = msg.get("message")
+                    .and_then(|m| m.get("usage"))
+                    .or_else(|| msg.get("usage"));
+                
+                // Skip if no usage data (like ccusage does)
+                if usage.is_none() {
+                    continue;
+                }
 
                 let input_tokens = usage
                     .and_then(|u| u.get("input_tokens"))
@@ -367,6 +436,13 @@ impl ParquetSummaryReader {
                     .and_then(|u| u.get("output_tokens"))
                     .and_then(|v| v.as_u64())
                     .unwrap_or(0) as u32;
+                
+                // Validate like ccusage - require both input and output tokens
+                if input_tokens == 0 && output_tokens == 0 {
+                    continue;
+                }
+                
+                messages_with_usage += 1;
 
                 let cache_creation_tokens = usage
                     .and_then(|u| u.get("cache_creation_input_tokens"))
@@ -378,18 +454,19 @@ impl ParquetSummaryReader {
                     .and_then(|v| v.as_u64())
                     .unwrap_or(0) as u32;
 
-                let model = metadata.get("model")
-                    .or_else(|| metadata.get("message").and_then(|m| m.get("model")))
+                let model = msg.get("message")
+                    .and_then(|m| m.get("model"))
+                    .or_else(|| msg.get("model"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("claude-3-sonnet");
 
-                // Calculate cost
-                let cost = if let Some(cost_val) = metadata.get("costUSD")
-                    .or_else(|| metadata.get("cost_usd")) {
+                // Calculate cost - prefer costUSD field but fallback to LiteLLM pricing
+                let cost = if let Some(cost_val) = msg.get("costUSD")
+                    .or_else(|| msg.get("cost_usd")) {
                     cost_val.as_f64().unwrap_or(0.0)
                 } else {
-                    // Use hardcoded pricing as fallback (pricing API is async)
-                    // This is fine since most messages should have cost already
+                    // Use hardcoded pricing as fallback since LiteLLM pricing is async
+                    // In the future, we could pre-fetch pricing data to avoid this
                     crate::pricing::calculate_cost_simple(
                         model,
                         input_tokens,
@@ -459,6 +536,10 @@ impl ParquetSummaryReader {
 
         info!(
             session_count = sessions.len(),
+            total_messages = total_messages_seen,
+            deduplicated = deduplicated_count,
+            no_dedup_key = no_dedup_key_count,
+            with_usage = messages_with_usage,
             "Loaded detailed session data from parquet files"
         );
 

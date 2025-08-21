@@ -79,6 +79,7 @@ pub mod timestamp_parser;
 
 // Live mode modules
 pub mod live;
+pub mod litellm_pricing;
 pub mod parquet;
 
 // Command modules
