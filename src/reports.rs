@@ -99,6 +99,7 @@
 use crate::models::*;
 use colored::Colorize;
 use std::collections::{HashMap, HashSet};
+use tracing::{debug, info};
 
 pub struct ReportDisplayManager;
 
@@ -251,7 +252,28 @@ impl ReportDisplayManager {
 
         // Process each session's daily usage breakdown
         for session in session_data {
+            // Debug: log session with daily usage
+            if !session.daily_usage.is_empty() {
+                debug!("Session {} has {} daily entries", session.session_id, session.daily_usage.len());
+                let dates: Vec<String> = session.daily_usage.keys().cloned().collect();
+                debug!("  Dates for session {}: {:?}", &session.session_id[..20.min(session.session_id.len())], dates);
+                for date in session.daily_usage.keys() {
+                    if date.contains("2025-08-20") {
+                        debug!("  Found Aug 20 entry in session {}", session.session_id);
+                    }
+                }
+            }
+            
             for (date, daily_usage) in &session.daily_usage {
+                // Debug: Track Aug 20 aggregation
+                if date == "2025-08-20" {
+                    debug!(
+                        "Processing Aug 20 for session {}: cost=${:.2}",
+                        &session.session_id[..20.min(session.session_id.len())],
+                        daily_usage.cost
+                    );
+                }
+                
                 let date_projects = daily_aggregates.entry(date.clone()).or_default();
 
                 let project = date_projects
@@ -283,6 +305,17 @@ impl ReportDisplayManager {
                     }
                 }
             }
+        }
+
+        // Debug: Log Aug 20 final totals
+        if let Some(aug20_data) = daily_aggregates.get("2025-08-20") {
+            let aug20_total: f64 = aug20_data.values().map(|p| p.total_cost).sum();
+            let aug20_sessions: u32 = aug20_data.values().map(|p| p.sessions).sum();
+            info!(
+                "Aug 20 final aggregation: {} sessions, total cost: ${:.2}",
+                aug20_sessions,
+                aug20_total
+            );
         }
 
         // Generate the last N days, even if they have no data

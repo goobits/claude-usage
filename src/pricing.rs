@@ -264,13 +264,13 @@ pub fn calculate_cost_simple(
     let (input_cost_per_token, output_cost_per_token, cache_creation_cost, cache_read_cost) = 
         if model.contains("opus-4") || model.contains("claude-opus-4") {
             // Claude 4 Opus pricing from LiteLLM
-            (0.000015, 0.000075, 0.00001875, 0.0000015) // $15/$75/$18.75/$1.50 per 1M tokens
+            (0.000015, 0.000075, 0.00001875, 0.000001875) // $15/$75/$18.75/$1.875 per 1M tokens
         } else if model.contains("sonnet-4") || model.contains("claude-sonnet-4") {
             // Claude 4 Sonnet pricing (similar to Opus)
             (0.000003, 0.000015, 0.00000375, 0.0000003) // $3/$15/$3.75/$0.30 per 1M tokens
         } else if model.contains("opus") {
             // Claude 3 Opus
-            (0.000015, 0.000075, 0.00001875, 0.0000015)
+            (0.000015, 0.000075, 0.00001875, 0.000001875)
         } else if model.contains("sonnet") {
             // Claude 3.5 Sonnet
             (0.000003, 0.000015, 0.00000375, 0.0000003)

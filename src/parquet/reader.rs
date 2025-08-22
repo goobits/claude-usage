@@ -14,8 +14,8 @@ use tracing::{debug, info, warn};
 
 use crate::live::BaselineSummary;
 
-/// Read a parquet file using claude-keeper library 
-fn read_parquet_with_library(parquet_file: &PathBuf) -> Result<String> {
+/// Read a parquet file using claude-keeper library and return JSON values directly
+fn read_parquet_with_library(parquet_file: &PathBuf) -> Result<Vec<serde_json::Value>> {
     debug!("Attempting to read parquet file: {}", parquet_file.display());
     
     // Use claude-keeper library to read and convert parquet to JSONL
@@ -23,12 +23,16 @@ fn read_parquet_with_library(parquet_file: &PathBuf) -> Result<String> {
     use claude_keeper::parquet_reader::{ConversationParquetReader, QueryFilter};
     match ConversationParquetReader::new(parquet_file) {
             Ok(reader) => {
+                info!("Successfully created parquet reader for: {}", parquet_file.display());
                 let filter = QueryFilter::new(); // No filters - get all data
                 match reader.query(&filter) {
                     Ok(results) => {
-                        debug!("Query returned {} objects", results.objects.len());
-                        // Convert FlexObjects to JSONL format
-                        let mut jsonl_lines = Vec::new();
+                        info!("Query returned {} objects from {}", results.objects.len(), parquet_file.display());
+                        // Convert FlexObjects directly to JSON values
+                        let mut json_objects = Vec::new();
+                        let mut failed_conversions = 0;
+                        let mut aug20_in_flexobjects = 0;
+                        
                         for (i, flex_obj) in results.objects.iter().enumerate() {
                             let json_val = flex_obj.to_json();
                             
@@ -63,12 +67,25 @@ fn read_parquet_with_library(parquet_file: &PathBuf) -> Result<String> {
                                 }
                             }
                             
-                            if let Ok(json_str) = serde_json::to_string(&json_val) {
-                                jsonl_lines.push(json_str);
+                            // Check for Aug 20 in the JSON value
+                            if let Some(timestamp) = json_val.get("timestamp").and_then(|v| v.as_str()) {
+                                if timestamp.contains("2025-08-20") {
+                                    aug20_in_flexobjects += 1;
+                                }
                             }
+                            
+                            // Add the JSON object directly
+                            json_objects.push(json_val);
                         }
-                        debug!("Converted {} objects to JSONL", jsonl_lines.len());
-                        Ok(jsonl_lines.join("\n"))
+                        
+                        if aug20_in_flexobjects > 0 {
+                            info!("Found {} Aug 20 messages in FlexObjects from {}", aug20_in_flexobjects, parquet_file.display());
+                        }
+                        
+                        debug!("Converted {} FlexObjects to JSON values", json_objects.len());
+                        
+                        // Return the JSON values directly
+                        Ok(json_objects)
                     }
                     Err(e) => {
                         warn!(
@@ -76,7 +93,7 @@ fn read_parquet_with_library(parquet_file: &PathBuf) -> Result<String> {
                             error = %e,
                             "Failed to query parquet file with claude-keeper library"
                         );
-                        Ok(String::new()) // Return empty instead of failing
+                        Ok(Vec::new()) // Return empty instead of failing
                     }
                 }
             }
@@ -86,7 +103,7 @@ fn read_parquet_with_library(parquet_file: &PathBuf) -> Result<String> {
                     error = %e,
                     "Failed to create parquet reader for file"
                 );
-                Ok(String::new()) // Return empty instead of failing
+                Ok(Vec::new()) // Return empty instead of failing
             }
         }
 }
@@ -293,13 +310,15 @@ impl ParquetSummaryReader {
 
         let parquet_files = self.find_parquet_files()?;
         
+        info!("Found {} parquet files in {}", parquet_files.len(), self.backup_dir.display());
+        
         if parquet_files.is_empty() {
             warn!("No parquet files found in backup directory");
             return Ok(Vec::new());
         }
 
         let total_files = parquet_files.len();
-        debug!(file_count = total_files, "Processing parquet files for detailed sessions");
+        info!(file_count = total_files, "Processing parquet files for detailed sessions");
 
         // Map to aggregate sessions across all files
         let mut sessions_map: HashMap<String, SessionData> = HashMap::new();
@@ -312,15 +331,18 @@ impl ParquetSummaryReader {
         let mut deduplicated_count = 0;
         let mut no_dedup_key_count = 0;
         let mut messages_with_usage = 0;
+        let mut aug20_messages = 0;
 
         // Process each parquet file
-        for parquet_file in &parquet_files {
-            debug!(file = %parquet_file.display(), "Reading messages from parquet file");
+        for (file_idx, parquet_file) in parquet_files.iter().enumerate() {
+            debug!(file = %parquet_file.display(), "Reading messages from parquet file {}/{}", 
+                   file_idx + 1, parquet_files.len());
             
             // Use claude-keeper library directly to read parquet data
-            let parquet_data = match read_parquet_with_library(parquet_file) {
+            info!("About to read parquet file: {}", parquet_file.display());
+            let messages: Vec<Value> = match read_parquet_with_library(parquet_file) {
                 Ok(data) => {
-                    debug!(file = %parquet_file.display(), "Successfully read parquet data, length: {}", data.len());
+                    info!(file = %parquet_file.display(), "Successfully read {} messages from parquet", data.len());
                     data
                 },
                 Err(e) => {
@@ -333,50 +355,39 @@ impl ParquetSummaryReader {
                 }
             };
             
-            if parquet_data.is_empty() {
-                debug!(file = %parquet_file.display(), "Parquet file returned empty data, skipping");
+            if messages.is_empty() {
+                debug!(file = %parquet_file.display(), "Parquet file returned no messages, skipping");
                 continue;
+            };
+            
+            debug!(file = %parquet_file.display(), 
+                   "Processing {} messages from parquet", messages.len());
+            
+            // Count Aug 20 messages before processing
+            let aug20_before_processing = messages.iter()
+                .filter(|msg| {
+                    msg.get("timestamp")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.contains("2025-08-20"))
+                        .unwrap_or(false)
+                })
+                .count();
+            
+            if aug20_before_processing > 0 {
+                info!(file = %parquet_file.display(),
+                      "Found {} Aug 20 messages in parsed JSON array (before processing loop)", 
+                      aug20_before_processing);
             }
             
-            let stdout = parquet_data;
-            
-            // Parse the JSON output - supports both JSON array and JSONL formats
-            let messages: Vec<Value> = match serde_json::from_str(&stdout) {
-                Ok(Value::Array(arr)) => arr,
-                Ok(Value::Object(obj)) if obj.contains_key("messages") => {
-                    obj.get("messages")
-                        .and_then(|v| v.as_array())
-                        .cloned()
-                        .unwrap_or_default()
-                }
-                _ => {
-                    // Try parsing as JSONL (newline-delimited JSON)
-                    let mut jsonl_messages = Vec::new();
-                    for line in stdout.lines() {
-                        let trimmed = line.trim();
-                        if !trimmed.is_empty() {
-                            match serde_json::from_str::<Value>(trimmed) {
-                                Ok(msg) => jsonl_messages.push(msg),
-                                Err(_) => continue, // Skip invalid JSON lines
-                            }
-                        }
-                    }
-                    
-                    if jsonl_messages.is_empty() {
-                        warn!(
-                            file = %parquet_file.display(),
-                            "No valid JSON found in parquet file - file may be empty or contain no conversation data"
-                        );
-                        continue;
-                    }
-                    
-                    jsonl_messages
-                }
-            };
+            let mut file_aug20 = 0;
+            let mut file_aug20_skipped_no_usage = 0;
+            let mut file_aug20_skipped_dedup = 0;
+            let mut file_total_processed = 0;
 
             // Process each message
             for msg in messages {
                 total_messages_seen += 1;
+                file_total_processed += 1;
                 
                 // Extract message ID and request ID for deduplication
                 let message_id = msg.get("message")
@@ -387,16 +398,28 @@ impl ParquetSummaryReader {
                 let request_id = msg.get("requestId")
                     .and_then(|v| v.as_str());
                 
-                // Create deduplication key like ccusage: messageId:requestId
+                // Get timestamp first to check if Aug 20 (before any skipping)
+                let timestamp_str = msg.get("timestamp")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let is_aug20 = timestamp_str.contains("2025-08-20");
+                
+                // Apply ccusage's actual deduplication approach:
+                // Try to deduplicate when both IDs available, but don't require them
                 if let (Some(mid), Some(rid)) = (message_id, request_id) {
                     let dedup_key = format!("{}:{}", mid, rid);
                     if seen_messages.contains(&dedup_key) {
                         // Skip duplicate message
                         deduplicated_count += 1;
+                        if is_aug20 {
+                            file_aug20_skipped_dedup += 1;
+                            debug!("Skipping duplicate Aug 20 message: {}", dedup_key);
+                        }
                         continue;
                     }
                     seen_messages.insert(dedup_key);
                 } else {
+                    // Count messages without dedup keys but still process them
                     no_dedup_key_count += 1;
                 }
                 
@@ -412,11 +435,7 @@ impl ParquetSummaryReader {
                     .and_then(|v| v.as_str())
                     .unwrap_or("default")
                     .to_string();
-
-                let timestamp_str = msg.get("timestamp")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-
+                
                 // Get usage data - check message field first (where it actually is)
                 let usage = msg.get("message")
                     .and_then(|m| m.get("usage"))
@@ -424,7 +443,23 @@ impl ParquetSummaryReader {
                 
                 // Skip if no usage data (like ccusage does)
                 if usage.is_none() {
+                    if is_aug20 {
+                        file_aug20_skipped_no_usage += 1;
+                    }
                     continue;
+                }
+                
+                // Only count Aug 20 messages that have usage and weren't skipped
+                if is_aug20 {
+                    aug20_messages += 1;
+                    file_aug20 += 1;
+                    
+                    // Extra debug for first few Aug 20 messages
+                    if aug20_messages <= 3 {
+                        debug!("Aug 20 message #{}: timestamp={}, has_usage=true", 
+                               aug20_messages, 
+                               timestamp_str);
+                    }
                 }
 
                 let input_tokens = usage
@@ -437,10 +472,9 @@ impl ParquetSummaryReader {
                     .and_then(|v| v.as_u64())
                     .unwrap_or(0) as u32;
                 
-                // Validate like ccusage - require both input and output tokens
-                if input_tokens == 0 && output_tokens == 0 {
-                    continue;
-                }
+                // ccusage doesn't filter messages based on token counts
+                // It processes ALL messages that have valid structure and usage data
+                // Even messages with zero tokens are included in calculations
                 
                 messages_with_usage += 1;
 
@@ -453,6 +487,12 @@ impl ParquetSummaryReader {
                     .and_then(|u| u.get("cache_read_input_tokens"))
                     .and_then(|v| v.as_u64())
                     .unwrap_or(0) as u32;
+                
+                // Debug: Log Aug 20 token extraction
+                if is_aug20 && aug20_messages <= 5 {
+                    info!("Aug 20 token extraction #{}: input={}, output={}, cache_creation={}, cache_read={}", 
+                          aug20_messages, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens);
+                }
 
                 let model = msg.get("message")
                     .and_then(|m| m.get("model"))
@@ -480,6 +520,10 @@ impl ParquetSummaryReader {
                 let date_str = if let Ok(ts) = TimestampParser::parse(timestamp_str) {
                     ts.format("%Y-%m-%d").to_string()
                 } else {
+                    // Log when we can't parse timestamp
+                    if timestamp_str.contains("2025-08-20") {
+                        debug!("Failed to parse Aug 20 timestamp: {}", timestamp_str);
+                    }
                     chrono::Utc::now().format("%Y-%m-%d").to_string()
                 };
 
@@ -511,23 +555,56 @@ impl ParquetSummaryReader {
                 daily.cache_creation_tokens += cache_creation_tokens;
                 daily.cache_read_tokens += cache_read_tokens;
                 daily.cost += cost;
+                
+                // Debug: Track Aug 20 cost accumulation
+                if date_str == "2025-08-20" {
+                    debug!(
+                        "Aug 20 cost update - Session: {}, Added: ${:.4}, Total for session-date: ${:.4}",
+                        &session_id[..20.min(session_id.len())],
+                        cost,
+                        daily.cost
+                    );
+                }
+            }
+            
+            // Log Aug 20 count per file
+            if file_aug20 > 0 || file_aug20_skipped_no_usage > 0 || file_aug20_skipped_dedup > 0 {
+                info!(file = %parquet_file.display(), 
+                      "Aug 20 messages - counted: {}, skipped (no usage): {}, skipped (dedup): {}, total: {}",
+                      file_aug20, file_aug20_skipped_no_usage, file_aug20_skipped_dedup,
+                      file_aug20 + file_aug20_skipped_no_usage + file_aug20_skipped_dedup);
             }
         }
 
         // Convert to SessionOutput format
         let mut sessions: Vec<SessionOutput> = sessions_map
             .into_iter()
-            .map(|(_, session_data)| SessionOutput {
-                session_id: session_data.session_id,
-                project_path: session_data.project_path,
-                input_tokens: session_data.input_tokens,
-                output_tokens: session_data.output_tokens,
-                cache_creation_tokens: session_data.cache_creation_tokens,
-                cache_read_tokens: session_data.cache_read_tokens,
-                total_cost: session_data.total_cost,
-                last_activity: session_data.last_activity.unwrap_or_else(|| "".to_string()),
-                models_used: session_data.models_used.into_iter().collect(),
-                daily_usage: session_data.daily_usage,
+            .map(|(_, session_data)| {
+                // Debug: Log sessions with Aug 20 data
+                if session_data.daily_usage.contains_key("2025-08-20") {
+                    let aug20_cost = session_data.daily_usage.get("2025-08-20")
+                        .map(|d| d.cost)
+                        .unwrap_or(0.0);
+                    info!(
+                        "Session {} has Aug 20 data: ${:.2} (total session cost: ${:.2})",
+                        &session_data.session_id[..20.min(session_data.session_id.len())],
+                        aug20_cost,
+                        session_data.total_cost
+                    );
+                }
+                
+                SessionOutput {
+                    session_id: session_data.session_id,
+                    project_path: session_data.project_path,
+                    input_tokens: session_data.input_tokens,
+                    output_tokens: session_data.output_tokens,
+                    cache_creation_tokens: session_data.cache_creation_tokens,
+                    cache_read_tokens: session_data.cache_read_tokens,
+                    total_cost: session_data.total_cost,
+                    last_activity: session_data.last_activity.unwrap_or_else(|| "".to_string()),
+                    models_used: session_data.models_used.into_iter().collect(),
+                    daily_usage: session_data.daily_usage,
+                }
             })
             .collect();
 
@@ -537,6 +614,7 @@ impl ParquetSummaryReader {
         info!(
             session_count = sessions.len(),
             total_messages = total_messages_seen,
+            aug20_messages = aug20_messages,
             deduplicated = deduplicated_count,
             no_dedup_key = no_dedup_key_count,
             with_usage = messages_with_usage,

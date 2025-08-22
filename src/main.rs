@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 use tracing::error;
 
 mod analyzer;
+mod ccusage_compat;
 mod commands;
 mod config;
 mod dedup;
@@ -72,6 +73,15 @@ enum Commands {
         /// Skip loading baseline data from parquet backups
         #[arg(long)]
         no_baseline: bool,
+    },
+    /// Test ccusage compatibility mode for exact parity
+    TestCompat {
+        /// Start date filter (YYYY-MM-DD)
+        #[arg(long)]
+        since: Option<String>,
+        /// End date filter (YYYY-MM-DD)
+        #[arg(long)]
+        until: Option<String>,
     },
 }
 
@@ -177,6 +187,54 @@ async fn main() -> Result<()> {
                         eprintln!("   • Check the logs for more details");
                     }
                     
+                    Err(e)
+                }
+            }
+        }
+        Commands::TestCompat { since, until } => {
+            println!("🧪 Testing CCUsage Compatibility Mode");
+            println!("=====================================");
+            
+            // Convert date formats if provided
+            let since_yyyymmdd = since.as_ref().map(|s| s.replace("-", ""));
+            let until_yyyymmdd = until.as_ref().map(|s| s.replace("-", ""));
+            
+            // Run ccusage compatibility mode
+            match ccusage_compat::get_ccusage_compatible_cost(
+                since_yyyymmdd.as_deref(),
+                until_yyyymmdd.as_deref(),
+            ).await {
+                Ok(cost) => {
+                    println!("\n✅ CCUsage-compatible cost: ${:.2}", cost);
+                    println!("\nThis should match ccusage's output exactly.");
+                    
+                    // Also run normal mode for comparison
+                    let (_since_date, _until_date, mut analyzer, options) =
+                        parse_common_args(false, None, since.clone(), until.clone(), "daily", false)?;
+                    
+                    match analyzer.aggregate_data("daily", options).await {
+                        Ok(sessions) => {
+                            let normal_cost: f64 = sessions.iter()
+                                .map(|s| s.total_cost)
+                                .sum();
+                            println!("\n📊 Normal mode cost: ${:.2}", normal_cost);
+                            
+                            let diff = (cost - normal_cost).abs();
+                            if diff < 0.01 {
+                                println!("✨ Perfect parity achieved!");
+                            } else {
+                                println!("⚠️  Difference: ${:.2}", diff);
+                            }
+                        }
+                        Err(e) => {
+                            println!("⚠️  Could not compare with normal mode: {}", e);
+                        }
+                    }
+                    
+                    Ok(())
+                }
+                Err(e) => {
+                    eprintln!("❌ Compatibility mode failed: {}", e);
                     Err(e)
                 }
             }

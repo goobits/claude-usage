@@ -90,3 +90,6 @@ pub use models::*;
 
 // Keeper integration module for schema-resilient parsing
 pub mod keeper_integration;
+
+// CCUsage compatibility module for exact parity
+pub mod ccusage_compat;

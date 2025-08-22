@@ -130,37 +130,35 @@ impl ClaudeUsageAnalyzer {
                 );
             }
 
-            // Apply date filtering if needed
+            // Filter sessions based on their daily_usage dates, not last_activity
+            // This ensures we include sessions that have activity in the date range
+            // even if their last activity was outside the range
             let mut filtered_sessions = sessions;
             if options.since_date.is_some() || options.until_date.is_some() {
                 filtered_sessions = filtered_sessions.into_iter()
                     .filter(|session| {
-                        // Parse session's last activity date
-                        use chrono::NaiveDate;
-                        
-                        if let Some(date_str) = session.last_activity.split('T').next() {
-                            if let Ok(session_date) = NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
-                                let session_datetime = session_date.and_hms_opt(0, 0, 0)
-                                    .map(|dt| chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(dt, chrono::Utc));
+                        // Check if this session has any daily_usage entries within the date range
+                        for date_str in session.daily_usage.keys() {
+                            if let Ok(date) = chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
+                                let session_date = date.and_hms_opt(0, 0, 0)
+                                    .and_then(|dt| Some(chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(dt, chrono::Utc)));
                                 
-                                if let Some(session_dt) = session_datetime {
-                                    // Check since date
-                                    if let Some(ref since) = options.since_date {
-                                        if session_dt < *since {
-                                            return false;
-                                        }
-                                    }
+                                if let Some(session_dt) = session_date {
+                                    // Check if this date is within our filter range
+                                    let within_range = match (&options.since_date, &options.until_date) {
+                                        (Some(since), Some(until)) => session_dt >= *since && session_dt <= *until,
+                                        (Some(since), None) => session_dt >= *since,
+                                        (None, Some(until)) => session_dt <= *until,
+                                        (None, None) => true,
+                                    };
                                     
-                                    // Check until date
-                                    if let Some(ref until) = options.until_date {
-                                        if session_dt > *until {
-                                            return false;
-                                        }
+                                    if within_range {
+                                        return true; // This session has activity in the date range
                                     }
                                 }
                             }
                         }
-                        true
+                        false // No activity in the date range
                     })
                     .collect();
             }
