@@ -22,3 +22,6 @@ Thumbs.db
 # Build artifacts
 /release/
 /debug/
+
+# Symbolic links directory
+.links
